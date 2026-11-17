@@ -38,6 +38,15 @@ ones. The main changes:
 - **Model support**: DeepSeek-V4 attention and memory layout, plus speculative decoding and
   multimodal fixes for the tested models.
 
+## Symmetric KV registration
+
+Every KV cache reports `kv_item_lens` in bytes per allocator page: MHA, MLA
+and the pools that wrap them (hybrid linear, SWA, MiniMax sparse). Symmetric
+P/D registers those values as page strides, so each read addresses page `p`
+at `base + p * page_nbytes` and copies one page's bytes, the same address the
+Mooncake push path computes. DSA and DeepSeek-V4 register explicit per-pool
+layouts with the same per-page strides.
+
 ## Naming
 
 The Python package is `decoupled_engine` (SGLang's `sglang`, with `srt/` and

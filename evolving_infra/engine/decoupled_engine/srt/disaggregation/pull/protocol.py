@@ -100,10 +100,11 @@ class PoolRegion(msgspec.Struct, frozen=True):
     ``ptrs[i]`` is the registered base pointer of entry i (a layer, or a K/V
     half of a layer for MHA pools; entry order is KVArgs.kv_data_ptrs order).
     ``page_nbytes[i]`` is the byte stride of one page index in entry i, so page
-    ``p`` lives at ``ptrs[i] + p * page_nbytes[i]``. Page-granular form of
-    mooncake/conn.py _send_kvcache_generic's ``ptr + token_index * item_len``;
-    page_nbytes = item_len * page_size for token-major pools, DeepSeek-V4
-    compressed pools override it via PoolLayout.page_nbytes.
+    ``p`` lives at ``ptrs[i] + p * page_nbytes[i]``, the same address
+    mooncake/conn.py _send_kvcache_generic computes as
+    ``ptr + page_index * item_len``. By default page_nbytes is
+    KVArgs.kv_item_lens, which every KV cache reports in bytes per page;
+    PoolLayout.page_nbytes overrides it.
     """
 
     ptrs: List[int]
@@ -146,7 +147,7 @@ class PoolLayout(msgspec.Struct, frozen=True):
     """How a named pool ('full', 'swa', 'c4', 'c128', ...) maps onto entries of
     KVArgs.kv_data_ptrs. Supplied by the scheduler half, which owns the pool
     configuration (mem_cache/kv_cache_configurator.py). ``page_nbytes``
-    overrides the derived ``kv_item_lens[e] * page_size`` stride."""
+    overrides the default ``kv_item_lens[e]`` page stride."""
 
     name: str
     entry_indices: List[int]
@@ -217,8 +218,9 @@ class Registration(msgspec.Struct):
     ) -> Registration:
         """Build from a disaggregation ``KVArgs`` (base/conn.py). Without
         ``pool_layouts`` every kv_data_ptrs entry belongs to one pool named
-        ``default_pool`` (plain MHA/MLA); multi-component
-        pools pass explicit layouts."""
+        ``default_pool``; multi-component pools pass explicit layouts.
+        ``kv_item_lens`` are bytes per page (KVCache.get_contiguous_buf_infos)
+        and are used as the page strides."""
         page_size = int(kv_args.page_size)
         kv_ptrs = [int(p) for p in kv_args.kv_data_ptrs]
         kv_item_lens = [int(n) for n in kv_args.kv_item_lens]
@@ -233,7 +235,6 @@ class Registration(msgspec.Struct):
                 kv_ptrs=kv_ptrs,
                 kv_item_lens=kv_item_lens,
                 kv_layer_ids=kv_layer_ids,
-                page_size=page_size,
             )
             for layout in pool_layouts
         }
@@ -267,7 +268,6 @@ def _pool_region_from_layout(
     kv_ptrs: List[int],
     kv_item_lens: List[int],
     kv_layer_ids: List[int],
-    page_size: int,
 ) -> PoolRegion:
     idx = list(layout.entry_indices)
     if layout.page_nbytes is not None:
@@ -277,7 +277,7 @@ def _pool_region_from_layout(
                 f"PoolLayout {layout.name}: {len(strides)} strides for {len(idx)} entries"
             )
     else:
-        strides = [kv_item_lens[e] * page_size for e in idx]
+        strides = [kv_item_lens[e] for e in idx]
     return PoolRegion(
         ptrs=[kv_ptrs[e] for e in idx],
         page_nbytes=strides,

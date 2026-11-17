@@ -213,14 +213,17 @@ def registration_pools_for(
 ) -> Tuple[Optional[List[PoolLayout]], Dict[str, PoolRegion]]:
     """(pool_layouts for Registration.from_kv_args, extra page pools) of this
     rank's KVArgs. DSA shares one page index space for MLA KV and indexer
-    bytes (including draft layers); both ride in the "full" pool. Other
-    non-DSv4 models keep the default layout. DSv4:
+    bytes (including draft layers); both ride in the "full" pool. Every other
+    non-DSv4 cache (MHA, MLA and the pools that wrap them, such as the hybrid
+    linear, SWA and MiniMax sparse pools) uses the default layout: all
+    kv_data_ptrs entries in "full", with kv_item_lens, which are bytes per
+    page, as the page strides (mooncake/conn.py addresses
+    `ptr + page_index * item_len`). DSv4:
 
     kv_data_ptrs (get_contiguous_buf_infos) is ordered [c4 kv x c4_layer_num,
     c4 indexer x c4_layer_num, c128 kv x c128_layer_num] and every entry is a
-    2D [num_pages, bytes_per_page] buffer, so kv_item_lens[e] is already the
-    page stride (mooncake/conn.py addresses `ptr + page_index * item_len`);
-    the token-major default `item_len * page_size` does not apply. c4 and c128
+    2D [num_pages, bytes_per_page] buffer, so kv_item_lens[e] is the page
+    stride. c4 and c128
     pages are addressed by the FULL page index; "full" itself owns no bytes.
     SWA pages live in the StateType.SWA state entries (get_state_buf_infos),
     one page of swa_page_size tokens per index, and become the "swa" pool.
@@ -241,16 +244,6 @@ def registration_pools_for(
                 + list(kv_args.state_item_lens[i]),
             )
         }
-    if any(cls.__name__ == "MLATokenToKVPool" for cls in type(kvcache).__mro__):
-        # Native MLA buffer descriptors already use bytes per allocator page.
-        # Supplying them as token strides would multiply page_size twice.
-        return [
-            PoolLayout(
-                name=POOL_FULL,
-                entry_indices=list(range(len(kv_args.kv_data_ptrs))),
-                page_nbytes=list(kv_args.kv_item_lens),
-            )
-        ], {}
     if not _is_dsv4_pool(kvcache):
         return None, {}
     if (
