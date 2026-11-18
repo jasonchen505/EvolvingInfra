@@ -1,3 +1,4 @@
+// Adapted from SGLang python/sglang/kernels/jit/csrc/moe/moe_fused_gate.cuh (commit 9a489f8d2f), modified for evolving-infra.
 #include <sgl_kernel/tensor.h>
 #include <sgl_kernel/utils.h>
 
@@ -43,8 +44,8 @@ __device__ __forceinline__ float compute_score(float x) {
     // sigmoid(x) = 1 / (1 + exp(-x))
     return 1.0f / (1.0f + expf(-x));
   } else {
-    // sqrt(softplus(x)) = sqrt(log(1 + exp(x)))
-    float softplus = log1pf(expf(x));
+    // sqrt(softplus(x)); sign folded out because expf overflows above 88.7.
+    const float softplus = fmaxf(x, 0.0f) + log1pf(expf(-fabsf(x)));
     return sqrtf(softplus);
   }
 }

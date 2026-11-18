@@ -93,6 +93,8 @@ from decoupled_engine.srt.function_call.json_array_parser import JsonArrayParser
 from decoupled_engine.srt.function_call.utils import (
     get_json_schema_constraint,
     normalize_json_schema_types,
+    strip_structural_tag_excludes,
+    without_schema_identifiers,
 )
 from decoupled_engine.srt.managers.io_struct import GenerateReqInput
 from decoupled_engine.srt.parser.conversation import generate_chat_conv
@@ -147,6 +149,21 @@ def parse_tool_call_arguments(arguments: str) -> Dict[str, Any]:
         )
 
     return parsed_arguments
+
+
+class _ClosingStreamingResponse(StreamingResponse):
+    """Close the body iterator however streaming ends.
+
+    Starlette leaves the iterator suspended when a send fails, and on ASGI
+    spec >= 2.4 it also skips the background task, so nothing would abort the
+    request until the generator is garbage collected.
+    """
+
+    async def stream_response(self, send) -> None:
+        try:
+            await super().stream_response(send)
+        finally:
+            await self.body_iterator.aclose()
 
 
 def normalize_assistant_tool_call_arguments(
@@ -713,8 +730,8 @@ class OpenAIServingChat(OpenAIServingBase):
     ) -> Optional[PromptTokensDetails]:
         if not self.tokenizer_manager.server_args.enable_cache_report:
             return None
-        return UsageProcessor._details_if_cached(
-            content["meta_info"].get("cached_tokens", 0)
+        return PromptTokensDetails(
+            cached_tokens=content["meta_info"].get("cached_tokens", 0)
         )
 
     def _reported_prompt_tokens(self, meta_info: Dict[str, Any]) -> int:
@@ -921,7 +938,9 @@ class OpenAIServingChat(OpenAIServingBase):
                 # guards against hand-crafted cyclic schemas so the request gets
                 # a 400 instead of crashing into a 500.
                 normalize_json_schema_types(tool.function.parameters)
-                Draft202012Validator.check_schema(tool.function.parameters)
+                Draft202012Validator.check_schema(
+                    without_schema_identifiers(tool.function.parameters)
+                )
             except SchemaError as e:
                 return f"Tool {i} function has invalid 'parameters' schema: {str(e)}"
             except RecursionError:
@@ -1165,6 +1184,20 @@ class OpenAIServingChat(OpenAIServingBase):
                     parallel_tool_calls=request.parallel_tool_calls,
                     thinking_mode=xgrammar_reasoning,
                 )
+                if (
+                    tool_call_constraint is not None
+                    and tool_call_constraint[0] == "structural_tag"
+                    and self._reasoning_detector is not None
+                ):
+                    # Same ownership rule: the reasoning parser handles think
+                    # tokens, so the grammar must not forbid them in free text.
+                    strip_structural_tag_excludes(
+                        tool_call_constraint[1],
+                        (
+                            self._reasoning_detector.think_start_token,
+                            self._reasoning_detector.think_end_token,
+                        ),
+                    )
                 required_parsed_natively = parser.detector.parses_required_natively()
                 if self.chat_encoding_spec == "kimi_k3":
                     tool_call_stop = parser.detector.eot_token
@@ -1323,11 +1356,15 @@ class OpenAIServingChat(OpenAIServingBase):
                 messages, request
             )
 
+            # tools is None when tool_choice is "none" (or no tool matched):
+            # render the request tools only when the request may call them.
+            request_tools = request.tools if tools else None
+
             if messages[0]["role"] != "system":
                 # insert an empty system prompt to help render tool system prompt
                 messages.insert(0, {"role": "system", "content": ""})
-            if request.tools:
-                messages[0]["tools"] = [tool.model_dump() for tool in request.tools]
+            if request_tools:
+                messages[0]["tools"] = [tool.model_dump() for tool in request_tools]
 
             # Default encoding (dsv4/dsv32)
             if self.chat_encoding_spec == "dsv4":
@@ -1591,11 +1628,14 @@ class OpenAIServingChat(OpenAIServingBase):
             return self.late_d_error_response(ended)
 
         async def prepend_first_chunk():
-            yield first_chunk
-            async for chunk in generator:
-                yield chunk
+            try:
+                yield first_chunk
+                async for chunk in generator:
+                    yield chunk
+            finally:
+                await generator.aclose()
 
-        return StreamingResponse(
+        return _ClosingStreamingResponse(
             prepend_first_chunk(),
             media_type="text/event-stream",
             background=self.tokenizer_manager.create_abort_task(adapted_request),
@@ -1636,15 +1676,14 @@ class OpenAIServingChat(OpenAIServingBase):
         video_tokens = {}
 
         stream_started = False
+        stream = self.tokenizer_manager.generate_request(adapted_request, raw_request)
         try:
             include_usage, continuous_usage_stats = should_include_usage(
                 request.stream_options,
                 self.tokenizer_manager.server_args.stream_response_default_include_usage,
             )
 
-            async for content in self.tokenizer_manager.generate_request(
-                adapted_request, raw_request
-            ):
+            async for content in stream:
                 index = content.get("index", 0)
                 if not hasattr(adapted_request, LATE_D_OUTCOME_ATTR):
                     # The first chunk says whether a symmetric choose
@@ -1875,6 +1914,10 @@ class OpenAIServingChat(OpenAIServingBase):
                 raise
             error = self.create_streaming_error_response(str(e))
             yield f"data: {error}\n\n"
+        finally:
+            # Closing generate_request runs its cleanup, which aborts the
+            # request only while this request still owns its rid.
+            await stream.aclose()
 
         yield "data: [DONE]\n\n"
 

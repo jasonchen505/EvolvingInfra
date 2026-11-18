@@ -1,3 +1,4 @@
+# Adapted from SGLang python/sglang/srt/mem_cache/mamba_radix_cache.py (commit 9a489f8d2f), modified for evolving-infra.
 from __future__ import annotations
 
 """
@@ -165,9 +166,11 @@ class TreeNode:
         return self.hash_value[-1]
 
     def get_prefix_hash_values(self, node: TreeNode) -> List[str]:
-        if node is None or node.hash_value is None:
-            return []
-        return node.get_prefix_hash_values(node.parent) + node.hash_value
+        chunks = []
+        while node is not None and node.hash_value is not None:
+            chunks.append(node.hash_value)
+            node = node.parent
+        return [value for chunk in reversed(chunks) for value in chunk]
 
     def __lt__(self, other: TreeNode):
         return self.last_access_time < other.last_access_time

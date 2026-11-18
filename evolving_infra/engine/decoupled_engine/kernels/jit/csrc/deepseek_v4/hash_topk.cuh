@@ -1,3 +1,4 @@
+// Adapted from SGLang python/sglang/kernels/jit/csrc/deepseek_v4/hash_topk.cuh (commit 9a489f8d2f), modified for evolving-infra.
 #include <sgl_kernel/tensor.h>
 #include <sgl_kernel/utils.h>
 
@@ -11,6 +12,9 @@
 #include <cstdint>
 
 namespace sglang {
+
+// Hash routing ignores scores, so an all-underflowed row would renorm 0/0 to NaN.
+constexpr float kRenormalizeSumEpsilon = 1e-20f;
 
 [[maybe_unused]]
 SGL_DEVICE float act_sqrt_softplus(float x) {
@@ -61,7 +65,8 @@ __global__ void moe_hash_topk_fused(const MoEHashTopKParams __grid_constant__ pa
     const bool is_shared = lane_id >= topk;
     const auto output_offset = warp_id * topk_fused + lane_id;
     topk_ids[output_offset] = is_shared ? num_routed_experts + lane_id - topk : expert_id;
-    topk_weights[output_offset] = is_shared ? 1.0f / routed_scaling_factor : routed_weight / routed_sum;
+    topk_weights[output_offset] =
+        is_shared ? 1.0f / routed_scaling_factor : routed_weight / (routed_sum + kRenormalizeSumEpsilon);
   }
 
   PDLTriggerSecondary<kUsePDL>();
