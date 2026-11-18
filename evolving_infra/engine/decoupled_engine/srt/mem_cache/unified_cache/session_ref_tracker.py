@@ -265,7 +265,9 @@ class KvSessionRetention:
     host_session_active counts the subset whose registration has at least one
     queued or running request on this worker (``request_ids`` non-empty).
     Released/ended records are retained to fence delayed network messages. At a
-    configured bound, new identities fail closed instead of discarding fences.
+    configured bound, a new identity first drops every released/ended record;
+    it fails closed only when live sessions fill the bound. A late tagged
+    arrival for a dropped session is admitted as a new session.
     A controller should namespace session IDs across its own restarts.
     """
 
@@ -312,6 +314,10 @@ class KvSessionRetention:
         self.predicted_active = self.fixed_table is not None
         self.sessions: dict[str, _KvRegistration] = {}
         self.requests: dict[str, _KvRegistration] = {}
+        # True once a record in self.sessions became released or ended after
+        # the last sweep; a full registry without one holds only live
+        # sessions, and _room_for_new_session refuses without scanning.
+        self.retired_since_sweep = False
         # One entry per incomplete context, keyed by its missing next native
         # page. New materialization wakes only sessions interested in that
         # path, including sessions whose previous copy has been evicted.
@@ -641,7 +647,7 @@ class KvSessionRetention:
                     raise ValueError("kv_session version reused for different input")
                 self._bind_request(req, current)
                 return current
-        elif len(self.sessions) >= self.max_sessions:
+        elif not self._room_for_new_session():
             self.stats.note_abort("capacity")
             raise ValueError("KV session retention registry capacity exceeded")
 
@@ -839,8 +845,36 @@ class KvSessionRetention:
             entry.wait_key = None
             if entry.state != "ended":
                 entry.state = "released"
+        self.retired_since_sweep = bool(self.sessions)
         self.requests.clear()
         self.pending.clear()
+
+    def _room_for_new_session(self):
+        """Return whether a new session id fits; at the bound, drop retired fences first.
+
+        The registry is scanned only when a record retired after the last
+        sweep (retired_since_sweep), so a registry full of live sessions
+        refuses in constant time.
+
+        Released and ended records hold no anchor, key or waiter, so dropping
+        one changes no tree counter. A request still bound to a dropped record
+        keeps its object token, which _live rejects, so no callback revives it.
+        Every caller is a scheduler event and the registry has the same
+        contents on every TP rank, so all ranks drop the same records.
+        """
+        if len(self.sessions) < self.max_sessions:
+            return True
+        if not self.retired_since_sweep:
+            return False
+        self.retired_since_sweep = False
+        retired = [
+            sid
+            for sid, entry in self.sessions.items()
+            if entry.state in ("released", "ended")
+        ]
+        for sid in retired:
+            del self.sessions[sid]
+        return len(self.sessions) < self.max_sessions
 
     def _retire(self, entry, state):
         """Drop prompt/request memory but keep the small version/lifetime fence."""
@@ -848,6 +882,7 @@ class KvSessionRetention:
         self._set_active(entry, False)
         self._replace_anchor(entry, None)
         entry.state = state
+        self.retired_since_sweep = True
         entry.input_key = entry.key = None
         for rid in entry.request_ids:
             if self.requests.get(rid) is entry:
@@ -874,10 +909,11 @@ class KvSessionRetention:
         }
         if op == "end":
             if entry is None:
-                if len(self.sessions) >= self.max_sessions:
+                if not self._room_for_new_session():
                     raise ValueError("KV session retention registry capacity exceeded")
                 entry = _KvRegistration(sid, version, None, None, state="ended")
                 self.sessions[sid] = entry
+                self.retired_since_sweep = True
             else:
                 self._retire(entry, "ended")
             reply["status"] = "ended"
@@ -887,7 +923,7 @@ class KvSessionRetention:
             # version even when no local arrival has executed yet; otherwise
             # a later callback can recreate the supposedly retired placement.
             if entry is None:
-                if len(self.sessions) >= self.max_sessions:
+                if not self._room_for_new_session():
                     raise ValueError("KV session retention registry capacity exceeded")
             elif entry.state == "ended":
                 reply["status"] = "ended"
@@ -896,6 +932,7 @@ class KvSessionRetention:
                 self._retire(entry, "released")
             entry = _KvRegistration(sid, version, None, None, state="released")
             self.sessions[sid] = entry
+            self.retired_since_sweep = True
         if entry is None:
             reply["status"] = "missing"
             return reply
