@@ -210,6 +210,25 @@ def test_plan_validation_happens_before_consuming_input(failure):
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize(("leg", "marker"), [("prefill", "kv_export"), ("decode", "kv_import")])
+@pytest.mark.parametrize(("transfer", "invalid"), [(0, False), (1, True), (1, 1.0)])
+def test_noninteger_transfer_ids_are_rejected_before_consuming_input(leg, marker, transfer, invalid):
+    async def scenario():
+        async with harness() as (service, api, base, seen, events):
+            info = (await api.post("/prepare", json=body())).json()
+            request = plan(info, base)
+            request["transfer_id"] = transfer
+            request["prefill"]["kv_export"]["transfer_id"] = transfer
+            request["decode"]["kv_import"]["transfer_id"] = transfer
+            request[leg][marker]["transfer_id"] = invalid
+            response = await api.post("/forward_pd", json=request)
+            assert response.status_code == 400
+            assert info["ref"] in service.store.entries and not seen and not events
+            request[leg][marker]["transfer_id"] = transfer
+            assert (await api.post("/forward_pd", json=request)).status_code == 200
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("failed_leg", ["p", "d"])
 def test_leg_submission_failure_cleans_both_sides_and_does_not_retry(failed_leg):
     async def scenario():

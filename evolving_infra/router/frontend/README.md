@@ -136,7 +136,15 @@ For split execution the Backend sends an already selected plan to
 `kv_export`, `kv_import` and optional `pull_hint` are produced by the engine
 Backend adapter, including all engine-required fields. The tokenizer does not
 choose nodes, create transfer IDs or invent KV policy. `transfer_id` is a JSON
-u64 and must match both marks. The P and D endpoints must differ, be in `targets`
+u64 and must match both marks and every decode candidate's `kv_import`.
+Nested transfer IDs, `prefill.late_d.k` and each candidate's `late_d.k` and
+`late_d.cand_idx` must be JSON integers. In a late-D plan, `prefill.late_d`
+also needs `v` in `[0, 256)`, a string `mode`, `router_epoch` in `[0, 2^32)`,
+`default_idx` in `[0, k)` and `local_ok` absent or `false`; every candidate
+repeats `v`, `mode` and `router_epoch` with the same type and value.
+Booleans and floating-point numbers are not integers here. Malformed fields are
+rejected with HTTP 400 before consuming the prepared input or submitting either leg.
+The P and D endpoints must differ, be in `targets`
 and have the prepared input's `config_id`. The callback URL must be in
 `callback_targets`; both target checks happen before the one-shot `Store.take`.
 

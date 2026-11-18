@@ -146,7 +146,7 @@ class ForwardPD(Release):
 
     @model_validator(mode="after")
     def matching_transfer(self):
-        """Validate that both KV leg markers use this plan's transfer ID.
+        """Validate the KV leg markers and late-D fields against this plan.
 
         Args:
             None.
@@ -155,9 +155,11 @@ class ForwardPD(Release):
             This validated ForwardPD instance.
 
         Raises:
-            ValueError: A prefill/export or decode/import transfer ID differs.
+            ValueError: A prefill/export or decode/import transfer ID differs,
+                or a late-D field is malformed, out of range or differs
+                between the P-leg and a candidate.
         """
-        if any(mark.get("transfer_id") != self.transfer_id for mark in
+        if any(type(mark.get("transfer_id")) is not int or mark["transfer_id"] != self.transfer_id for mark in
                (self.prefill.kv_export, self.decode.kv_import)):
             raise ValueError("P/D transfer IDs must match the plan")
         if self.decode_candidates is None:
@@ -172,11 +174,28 @@ class ForwardPD(Release):
             raise ValueError("Late D needs the prefill late_d field and 1..64 candidates")
         if self.decode.kv_session is not None:
             raise ValueError("Late-D decode legs carry no KV session tag")
-        if self.prefill.late_d.get("k") != k:
+        if type(self.prefill.late_d.get("k")) is not int or self.prefill.late_d["k"] != k:
             raise ValueError("late_d.k differs from the candidate count")
+        late = self.prefill.late_d
+        if not (_uint_below(late.get("v"), 2**8) and type(late.get("mode")) is str
+                and _uint_below(late.get("router_epoch"), 2**32)
+                and _uint_below(late.get("default_idx"), k)
+                # Prepared plans never offer LOCAL: the tokenizer streams an
+                # admitted candidate's D-leg.
+                and late.get("local_ok", False) is False):
+            raise ValueError("prefill late_d fields are malformed")
         for i, cand in enumerate(self.decode_candidates):
-            if cand.kv_import.get("transfer_id") != self.transfer_id:
+            if type(cand.kv_import.get("transfer_id")) is not int or cand.kv_import["transfer_id"] != self.transfer_id:
                 raise ValueError("Candidate transfer IDs must match the plan")
-            if cand.late_d.get("cand_idx") != i or cand.late_d.get("k") != k:
+            if any(type(cand.late_d.get(key)) is not int or cand.late_d[key] != value
+                   for key, value in (("cand_idx", i), ("k", k))):
                 raise ValueError("Candidate late_d fields must follow the candidate order")
+            if any(key not in cand.late_d or type(cand.late_d[key]) is not type(late[key])
+                   or cand.late_d[key] != late[key] for key in ("v", "mode", "router_epoch")):
+                raise ValueError("Candidate late_d fields must match the prefill late_d")
         return self
+
+
+def _uint_below(value, bound: int) -> bool:
+    """Whether value is a JSON integer (not a boolean or float) in [0, bound)."""
+    return type(value) is int and 0 <= value < bound
