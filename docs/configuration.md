@@ -204,7 +204,13 @@ holds what it cannot detect.
 | `gateway` | start the agent gateway for coding-agent harnesses on port 30800 (`evolving_infra/router/gateway`); `host` is its bind address | off; `host` 127.0.0.1 |
 | `engine_args`, `router_args` | flags appended to every engine and to the router | `--trust-remote-code`; none |
 | `planner` | planner arguments ([Dynamic P/D](dynamic-pd.md)); used with `--planner` | none |
-| `base` | another config file to start from; `engine_args` replace the base's flags of the same name | none |
+| `base` | another config file to start from; `engine_args` and `router_args` replace the base's options of the same name, including their values | none |
+
+Both argument lists accept `--name=value` and separate tokens such as
+`[--page-size, '64']`. A child option replaces the base option together with all
+of its value tokens. Other options and their values keep their order. A value
+in either form that names a file relative to the current directory is passed as
+that file's full path, because the processes run in the work directory.
 
 `examples/slurm/submit.py` also reads `benchmarks` (a map of name to replay: `workload`,
 `concurrency`, `duration`, `warmup`, `prefill_workers`; `processes` and `shards` for several

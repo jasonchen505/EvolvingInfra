@@ -154,3 +154,42 @@ def test_a_config_keeps_the_router_flags_and_env_of_its_base(tmp_path):
     assert cfg["router_args"] == ["--a=1", "--b=3", "--c"]
     assert cfg["engine_env"] == {"X": 1, "Y": 5}
     assert cfg["engine_args"] == ["--e=1"]
+
+
+@pytest.mark.parametrize("key", ["engine_args", "router_args"])
+@pytest.mark.parametrize(("base_args", "child_args", "expected"), [
+    (["--size", "64", "--keep"], ["--size", "128"], ["--keep", "--size", "128"]),
+    (["--size", "64", "--keep"], ["--size=128"], ["--keep", "--size=128"]),
+    (["--size=64", "--keep"], ["--size", "128"], ["--keep", "--size", "128"]),
+    (["--sizes", "1", "2", "--keep", "unchanged"], ["--sizes", "3", "4"],
+     ["--keep", "unchanged", "--sizes", "3", "4"]),
+    (["--offset", "-1", "--keep"], ["--offset", "-2"], ["--keep", "--offset", "-2"]),
+    (["-tp", "4", "--keep"], ["-tp=8"], ["--keep", "-tp=8"]),
+    (["--enable", "--keep", "64"], ["--enable"], ["--keep", "64", "--enable"]),
+    (["--keep", "64"], ["--size", "64"], ["--keep", "64", "--size", "64"]),
+])
+def test_config_overrides_replace_whole_options(tmp_path, key, base_args, child_args, expected):
+    (tmp_path / "base.yaml").write_text(f"model: /m\n{key}: {json.dumps(base_args)}\n")
+    top = tmp_path / "top.yaml"
+    top.write_text(f"base: base.yaml\n{key}: {json.dumps(child_args)}\n")
+    assert config(parse(["serve", "--config", str(top)]))[key] == expected
+
+
+def test_config_overrides_survive_multiple_inheritance_levels(tmp_path):
+    (tmp_path / "base.yaml").write_text("model: /m\nengine_args: [--size, '64', --keep]\n")
+    (tmp_path / "middle.yaml").write_text("base: base.yaml\nengine_args: [--size=128]\n")
+    top = tmp_path / "top.yaml"
+    top.write_text("base: middle.yaml\nengine_args: [--size, '256']\n")
+    assert config(parse(["serve", "--config", str(top)]))["engine_args"] == ["--keep", "--size", "256"]
+
+
+@pytest.mark.parametrize("key", ["engine_args", "router_args"])
+def test_relative_file_values_get_full_paths_in_both_option_forms(tmp_path, monkeypatch, key):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "a.json").write_text("{}")
+    (tmp_path / "b.json").write_text("{}")
+    (tmp_path / "top.yaml").write_text(
+        f"model: /m\n{key}: [--first=a.json, --second, b.json, --name, missing.json, --size, '64']\n")
+    assert config(parse(["serve", "--config", "top.yaml"]))[key] == [
+        f"--first={tmp_path / 'a.json'}", "--second", str(tmp_path / "b.json"),
+        "--name", "missing.json", "--size", "64"]

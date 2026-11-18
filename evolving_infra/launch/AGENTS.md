@@ -21,8 +21,9 @@ host, the KV directory, the frontend, the router and the planner.
 - **The planner is on only with `--planner`.** The config's `planner:` section holds its
   arguments. With the planner and KV session retention on, the router accepts only
   prepared-path requests, so a plain OpenAI request works only without `--planner`.
-- **A config can start from another** (`base: other.yaml`); an engine flag given in the
-  child replaces the same flag of the base. Model settings go in `examples/`, not in code.
+- **A config can start from another** (`base: other.yaml`); an engine or router option given
+  in the child replaces the same option of the base, together with its values
+  (`merge_args`). Model settings go in `examples/`, not in code.
 - **`examples/slurm/submit.py` only writes a job script.** Inspect it with `--dry-run`. What
   runs on the nodes is `evolving-infra serve` and the replay command, the same as by hand.
 

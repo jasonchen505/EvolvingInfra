@@ -28,22 +28,36 @@ def parse(argv=None):
     return parser.parse_args(argv)
 
 
-def _flag(arg: str) -> str:
-    return arg.split("=", 1)[0]
+def _argument_groups(args: list[str]) -> list[list[str]]:
+    """Keep each option with its following values, including negative numbers."""
+    groups = []
+    for arg in args:
+        if not groups or arg.startswith("--") or (arg.startswith("-") and arg[1:2].isalpha()):
+            groups.append([arg])
+        else:
+            groups[-1].append(arg)
+    return groups
+
+
+def merge_args(base: list[str], overrides: list[str]) -> list[str]:
+    """Replace options together with their values, keeping untouched groups."""
+    replaced = {group[0].split("=", 1)[0] for group in _argument_groups(overrides)}
+    return [arg for group in _argument_groups(base)
+            if group[0].split("=", 1)[0] not in replaced for arg in group] + overrides
 
 
 def load(path: Path) -> dict:
-    """A config file; ``base: other.yaml`` starts from that file. Engine and router flags given here
-    replace the base's flags of the same name and keep the others; mappings (``engine_env``,
-    ``frontend``, ``gateway``, ``planner``) are merged key by key; any other key replaces the base's."""
+    """A config file; ``base: other.yaml`` starts from that file. Engine and router options given here
+    replace the base's options of the same name, together with their values, and keep the others;
+    mappings (``engine_env``, ``frontend``, ``gateway``, ``planner``) are merged key by key; any
+    other key replaces the base's."""
     cfg = yaml.safe_load(path.read_text()) or {}
     if "base" not in cfg:
         return cfg
     out = load(path.parent / cfg.pop("base"))
     for key in ("engine_args", "router_args"):
         mine = cfg.pop(key, [])
-        replaced = {_flag(a) for a in mine}
-        out[key] = [a for a in out.get(key, []) if _flag(a) not in replaced] + mine
+        out[key] = merge_args(out.get(key, []), mine)
     for key in ("engine_env", "frontend", "gateway", "planner"):
         if isinstance(cfg.get(key), dict) and isinstance(out.get(key), dict):
             out[key] = {**out[key], **cfg.pop(key)}
@@ -51,14 +65,18 @@ def load(path: Path) -> dict:
     return out
 
 
+def _absolute_file(value: str) -> str:
+    return str(Path(value).resolve()) if not value.startswith("/") and Path(value).is_file() else value
+
+
 def absolute(flags: list) -> list:
-    """Flags whose value is a file relative to the current directory, with that file's full path:
-    the processes run in the work directory."""
+    """Option values that name a file relative to the current directory, with that file's full
+    path, in both `--name=value` and `--name value` form: the processes run in the work directory."""
     out = []
-    for flag in flags:
-        name, eq, value = flag.partition("=")
-        out.append(f"{name}={Path(value).resolve()}" if eq and not value.startswith("/") and Path(value).is_file()
-                   else flag)
+    for group in _argument_groups(flags):
+        name, eq, value = group[0].partition("=")
+        out.append(f"{name}={_absolute_file(value)}" if eq else group[0])
+        out.extend(_absolute_file(value) for value in group[1:])
     return out
 
 

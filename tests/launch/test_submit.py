@@ -5,6 +5,9 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+import yaml
+
 SUBMIT = Path(__file__).resolve().parents[2] / "examples/slurm/submit.py"
 
 
@@ -59,3 +62,18 @@ def test_a_benchmark_flag_replaces_the_served_flag_of_the_same_name(tmp_path):
     assert "- --prefill-wait=forecast" in served and "--prefill-wait=tokens" not in served
     assert "- --global-queue\n" in served and "--global-queue=false" not in served
     assert "- --symmetric-pd-decode-host-return" in served, "a new flag is added"
+
+
+@pytest.mark.parametrize("key", ["engine_args", "router_args"])
+def test_a_benchmark_override_replaces_the_option_and_its_values(tmp_path, key):
+    config = tmp_path / "bench.yaml"
+    config.write_text(yaml.safe_dump({
+        "model": "/m", key: ["--size", "64", "--keep"],
+        "slurm": {"nodes": 1},
+        "benchmarks": {"test": {
+            "workload": "test.jsonl", "concurrency": 1, "duration": 60,
+            "warmup": 0, "prefill_workers": 1, key: ["--size", "128"],
+        }},
+    }))
+    served = yaml.safe_load(dry_run("--config", str(config)).split("<<'CONFIG'")[1].split("CONFIG")[0])
+    assert served[key] == ["--keep", "--size", "128"]
