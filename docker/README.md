@@ -14,14 +14,14 @@ Singularity image from the same steps.
 ## Prebuilt image
 
 `docker.io/weili0234/evolving-infra:v0.1.0` is one tag for both architectures
-(index `sha256:58dee280969ec6248618eddfa690b2c195c9e1612da1f33e96d8f9919e7d4aee`); `docker pull`
+(index `sha256:240574d2e705ef36de82db900d37cae791f0bbb5aeb42a6908cbe066dff5c531`); `docker pull`
 picks the one of the host. A tag can be moved and a digest cannot, so a deployment that must
 run the same image every time pins the digest of its architecture:
 
 | Architecture | Image | Source |
 |---|---|---|
-| x86_64 (H200, B300) | `docker.io/weili0234/evolving-infra@sha256:36d47c0a5215d52c2f5d7f1d0112ba26d12449da93cc00fb723f908e0c52a428` | `486dcd1` |
-| aarch64 (GB300) | `docker.io/weili0234/evolving-infra@sha256:ef0ecc7b1aed1937a32ce4d968131418a8330540b74bc7b0868f22ee12f6241e` | `486dcd1` |
+| x86_64 (H200, B300) | `docker.io/weili0234/evolving-infra@sha256:01c268f6f9177a026b98d1725e8a15137d890101faa6c5a97255ac0e640683e5` | `855fa5b` |
+| aarch64 (GB300) | `docker.io/weili0234/evolving-infra@sha256:05c429814429c7ae1aec8e07371f43bf23e70a8d1cea4e911df52493e4cf481d` | `855fa5b` |
 
 `docker/build_and_push.sh` builds and pushes one architecture from a committed revision
 (`git archive`, so local files never enter the image) and prints the digest; build each
