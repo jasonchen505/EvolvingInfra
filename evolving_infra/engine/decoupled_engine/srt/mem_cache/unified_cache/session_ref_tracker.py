@@ -27,14 +27,13 @@ from decoupled_engine.srt.mem_cache.unified_cache.retention_order import (
     idle_age_bin,
     parse_retention_order,
 )
-from decoupled_engine.srt.mem_cache.unified_cache.unified_tree_core import NodeId
 
 if TYPE_CHECKING:
     from decoupled_engine.srt.managers.schedule_batch import Req
     from decoupled_engine.srt.mem_cache.unified_cache.components.base import (
         TreeComponent,
     )
-    from decoupled_engine.srt.mem_cache.unified_cache.unified_tree_core import UnifiedTreeCore
+    from decoupled_engine.srt.mem_cache.unified_cache.unified_tree_core import NodeId, UnifiedTreeCore
 
 logger = logging.getLogger(__name__)
 
