@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
+from decoupled_engine.srt.environ import envs
 from decoupled_engine.srt.hardware_backend.mlx.runtime import use_mlx
 from decoupled_engine.srt.mem_cache.base_prefix_cache import BasePrefixCache
 from decoupled_engine.srt.mem_cache.cache_init_params import CacheInitParams
