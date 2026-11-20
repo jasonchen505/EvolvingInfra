@@ -189,11 +189,10 @@ def handle_pd_disaggregation(server_args: ServerArgs) -> None:
                         "already held (its decode_prefix_len)."
                     )
             elif cfg.enable_hierarchical_cache:
-                # full_state follows upstream (#40857: EAGLE/EAGLE3 with the
-                # decode radix cache). EI keeps its limits only for the HiCache
-                # host tier, the path its packed EAGLE restore was validated on.
-                # EI-UPGRADE-TODO: reconcile with upstream's EAGLE decode
-                # HiCache restore, then drop these limits.
+                # With a HiCache host tier, full_state limits EAGLE and EAGLE3
+                # as below; without one, they take only upstream's checks.
+                # TODO: restore EAGLE and EAGLE3 drafts from the host tier
+                # without these limits.
                 # GLM EAGLE can retain target and draft KV at their shared
                 # physical indices. A HiCache host tier is allowed only with
                 # the packed MTP host layout, whose one restore op brings back

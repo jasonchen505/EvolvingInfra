@@ -1264,9 +1264,10 @@ class OpenAIServingChat(OpenAIServingBase):
                 or processed_messages.audio_data
             )
         )
-        # EI-UPGRADE-TODO: EI's DeepSeek-V4-Vision (spec "dsv4", multimodal) now
-        # renders through the deepseek-recipe adapter, which leaves the text
-        # prompt empty; it needs "dsv4" in chat_encoding.spec_renders_prompt_ids.
+        # TODO: add "dsv4" to chat_encoding.spec_renders_prompt_ids.
+        # DeepSeek-V4-Vision (spec "dsv4", multimodal) renders through the
+        # deepseek-recipe adapter, which leaves the text prompt empty, and this
+        # branch returns that empty prompt for it.
         if (
             is_multimodal
             and not chat_encoding.spec_renders_prompt_ids(self.chat_encoding_spec)

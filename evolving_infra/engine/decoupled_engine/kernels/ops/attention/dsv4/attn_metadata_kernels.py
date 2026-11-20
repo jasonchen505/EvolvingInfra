@@ -575,8 +575,8 @@ def build_causal_swa_page_indices(
         # Per-token visible windows (image spans): row i covers
         # [win_starts[i], win_starts[i] + win_lens[i]); width covers the max.
         assert win_lens is not None
-        # EI-UPGRADE: DeepSeek-V4 (Flash) vision windows; upstream's V4.1 replay
-        # floor (swa_replay_start) is never combined with them.
+        # DeepSeek-V4 (Flash) vision windows never combine with the DeepSeek-V4.1
+        # replay floor (swa_replay_start).
         assert swa_replay_start is None
         window_width = int(win_lens.max().item())
         padded_width = (
@@ -678,7 +678,7 @@ def build_causal_swa_page_indices_triton(
     num_qo_tokens = seq_lens_casual.size(0)
     if win_lens is not None:
         # Per-token visible windows (image spans); width covers the max len.
-        assert swa_replay_start is None  # EI-UPGRADE: see the torch builder
+        assert swa_replay_start is None  # see build_causal_swa_page_indices
         window_width = int(win_lens.max().item())
     else:
         window_width = swa_window

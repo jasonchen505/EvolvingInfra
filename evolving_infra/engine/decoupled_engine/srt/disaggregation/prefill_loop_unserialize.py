@@ -24,10 +24,9 @@ CPU waits behind the barrier move:
 - 6d ``SGLANG_PREFILL_EARLY_SEND_ASYNC``: the early send copies its page ids
   asynchronously at launch and is issued after the launch, at a fixed point
   of the loop (same point on every TP rank).
-- 6g ``SGLANG_MOONCAKE_EARLY_SEND_WAIT``: the Mooncake transfer worker waits
-  for the early send's ``_early_send_wait_event`` on its own thread before
-  posting the RDMA read (only Mori did). 6d already orders the send after that
-  forward when 6d is on; 6g also covers sends that keep the legacy path.
+- 6g ``SGLANG_MOONCAKE_EARLY_SEND_WAIT``: accepted and has no effect; the
+  Mooncake transfer worker does not wait on ``_early_send_wait_event``. 6d
+  orders the send after that forward.
 - 6h ``SGLANG_PREFILL_DEFER_WRITE_SUBMIT``: write-through submissions made
   behind the barrier (``move_indices`` does a blocking index D2H for the
   ``direct`` IO backend) run after the next launch instead. In an iteration
@@ -81,11 +80,11 @@ def overlap_gate_pending_reorder_enabled() -> bool:
 
 def sender_waits_on_early_send_event(sender: Any) -> bool:
     """Whether the KV sender's connector waits on ``_early_send_wait_event``
-    before it reads the pages (Mooncake with 6g on)."""
-    # EI-UPGRADE-TODO: v0.5.23's Mooncake transfer worker always waits on the
-    # early-send event (#41395; G5 dropped 6g), and nothing sets
-    # kv_mgr._early_send_wait any more, so this is False: with Q4 and 6d off
-    # the early send is deferred (6d path; safe, one flush later).
+    before it reads the pages, as its ``kv_mgr._early_send_wait`` flag says."""
+    # TODO: report the connectors that wait on the event. Nothing sets
+    # kv_mgr._early_send_wait, so this returns False even for Mooncake and
+    # Mori, whose transfer workers wait on it; with Q4 on and 6d off, their
+    # early sends take the deferred 6d path (one flush later).
     return getattr(getattr(sender, "kv_mgr", None), "_early_send_wait", False) is True
 
 
@@ -266,7 +265,7 @@ def flush_pending_early_sends(
     ``ready_event`` already implies it; waiting on ``wait_event`` too keeps
     the order when the barrier waits only for a read-done event. This orders
     the RDMA read for connectors that ignore ``_early_send_wait_event``
-    (Mooncake without 6g). These are synchronize() calls, never query()."""
+    (Mooncake). These are synchronize() calls, never query()."""
     for p in pending:
         if p.ready_event is not None:  # None: the ids came from the CPU (Q4)
             p.ready_event.synchronize()

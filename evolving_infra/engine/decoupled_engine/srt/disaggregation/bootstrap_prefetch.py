@@ -1466,8 +1466,9 @@ class BootstrapPrefetcher:
                 paths.append(None)
                 continue
             params = pin.lock_params
-            # EI-UPGRADE-TODO: v0.5.23 receipts carry component lock UUIDs, not the
-            # skipped node ids; without them nothing on the path counts as skipped.
+            # TODO: leave out the nodes the lock skipped. Lock receipts carry no
+            # skipped node ids, so skip is always empty and every node on the
+            # path counts as locked by this pin.
             skip = (
                 (getattr(params, "skip_lock_node_ids", None) or {}).get(full, ())
                 if params is not None

@@ -852,10 +852,6 @@ def build_kv_cache(
             token_to_kv_pool=token_to_kv_pool_allocator.get_kvcache(),
         )
         if enable_hierarchical_cache:
-            # EI-UPGRADE-TODO: upstream (#40857) allows EAGLE with the decode
-            # radix cache in general; this EI fail-closed check of the HiCache
-            # draft restore layout still runs in full_state mode. Confirm on
-            # GPU that it accepts upstream's PACKED / SIDECAR draft plans.
             if spec_algorithm.is_eagle() and (
                 get_disagg().disaggregation_decode_radix_cache_mode
                 not in ("content_only", "window_host")

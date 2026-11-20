@@ -1789,12 +1789,11 @@ class EAGLEWorkerV2(BaseSpecWorker):
             return result
 
         batch.spec_info = verify_input
-        # EI-UPGRADE-TODO: this upstream DP spec/prefill coordination path (new in
-        # v0.5.23) skips EI's strict-replay pre-verify steps from
-        # forward_batch_generation (forced-output cursor sync, synthetic-oracle
-        # inject/validate, graph-mode metrics); verify still uses
-        # self._eagle_sample_fn. Port them if strict replay must run with
-        # SGLANG_ENABLE_DP_SPEC_PREFILL_COORDINATION.
+        # TODO: run forward_batch_generation's strict-replay pre-verify steps
+        # (forced-output cursor sync, synthetic-oracle inject/validate,
+        # graph-mode metrics) on this SGLANG_ENABLE_DP_SPEC_PREFILL_COORDINATION
+        # path, which skips them; verify samples with self._eagle_sample_fn on
+        # both paths.
         result = self.verify(batch, grammar_barrier=grammar_barrier)
         if on_publish is not None:
             on_publish(result.new_seq_lens)

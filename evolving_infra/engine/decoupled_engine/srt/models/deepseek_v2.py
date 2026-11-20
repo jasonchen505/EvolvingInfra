@@ -551,9 +551,9 @@ class MoEGate(nn.Module):
                 torch.empty(config.n_routed_experts, dtype=torch.float32),
                 requires_grad=False,
             )
-        # The vision checkpoint provides a separate routing bias for image tokens.
-        # EI-UPGRADE: EI's DeepSeek-V4 (Flash) vision port only; DeepSeek-V4.1
-        # vision routes with upstream's e_score_correction_bias_vl above.
+        # The DeepSeek-V4 (Flash) vision checkpoint provides a separate routing
+        # bias for image tokens; DeepSeek-V4.1 vision routes them with
+        # e_score_correction_bias_vl above.
         self.bias_vl = (
             nn.Parameter(torch.empty(config.n_routed_experts, dtype=torch.float32))
             if getattr(config, "vision_n_layers", 0) > 0
@@ -1386,25 +1386,26 @@ class DeepseekV2MoE(nn.Module):
                 )
                 router_logits_partials = kwargs.pop("router_logits_partials", None)
                 if router_logits_partials is not None:
-                    # EI-UPGRADE: the ROCm split-K router leaves router_logits
-                    # unreduced for the fused gate; reduce it for the eager top-k.
+                    # The ROCm split-K router leaves router_logits unreduced for
+                    # the fused gate; reduce it for the eager top-k.
                     from decoupled_engine.kernels.ops.gemm.router_gemv_hip import (
                         rocm_router_reduce_partials,
                     )
 
                     rocm_router_reduce_partials(router_logits_partials, router_logits)
-                # EI-UPGRADE: TopK now derives the padded-row bound and the EPLB
-                # dispatch info from the layer and the active forward (#44994).
+                # TopK fills in the padded-row bound from the active forward and
+                # the EPLB dispatch info from the layer when kwargs carry none.
                 num_token_non_padded, expert_location_dispatch_info = (
                     self.topk._resolve_routing_inputs(
                         kwargs.pop("num_token_non_padded", None),
                         kwargs.pop("expert_location_dispatch_info", None),
                     )
                 )
-                # EI-UPGRADE-TODO: per_token_biased_topk (layers/moe/topk.py, auto-
-                # merged) still reads TopKConfig.num_fused_shared_experts, which
-                # upstream split into num_shared_topk_slots (#44912); port it before
-                # serving DeepSeek-V4 (Flash) vision images on non-hash layers.
+                # TODO: port per_token_biased_topk (layers/moe/topk.py) to
+                # TopKConfig.num_shared_topk_slots. It reads
+                # TopKConfig.num_fused_shared_experts, which TopKConfig does not
+                # define, so this call raises AttributeError for DeepSeek-V4
+                # (Flash) vision image tokens on non-hash layers.
                 topk_output = per_token_biased_topk(
                     hidden_states=hidden_states,
                     router_logits=router_logits,

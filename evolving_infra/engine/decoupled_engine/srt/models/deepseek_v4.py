@@ -4485,8 +4485,8 @@ class DeepseekV4Model(nn.Module):
         # idle/text-only rank would skip the check while the gathered global
         # ids still contain a peer's mm pad sentinels, sending them into the
         # fused hash_topk kernel for an illegal access.)
-        # EI-UPGRADE: only EI's DeepSeek-V4 (Flash) vision checkpoints route on
-        # these (MoEGate.bias_vl); other models skip the host sync of .any().
+        # Only DeepSeek-V4 (Flash) vision checkpoints route on these
+        # (MoEGate.bias_vl); other models skip the host sync of .any().
         if (
             getattr(self.config, "vision_n_layers", 0) > 0
             and self.config.model_type != "deepseek_v41"
@@ -5723,10 +5723,10 @@ class DeepseekV4ForCausalLM(nn.Module):
 # class unchanged. Do not re-add an EntryClass here — the model registry rejects
 # duplicate class names.
 # EntryClass = [DeepseekV4ForCausalLM]  # see deepseek_v4_vl.py
-# EI-UPGRADE-TODO: the deepseek_v4_vl.py wrapper therefore also serves upstream's
-# DeepSeek-V4.1 (text and vision). Its vision tower, processor and
-# vision_n_layers checks must leave model_type "deepseek_v41" to this class's
-# in-model ViT (self.vision, prepare_language_model_inputs).
+# The deepseek_v4_vl.py wrapper also serves DeepSeek-V4.1 (text and vision).
+# TODO: make its vision tower, processor and vision_n_layers checks leave
+# model_type "deepseek_v41" to this class's in-model ViT (self.vision,
+# prepare_language_model_inputs).
 
 
 def _dequant_fp8(weight: torch.Tensor, scale: torch.Tensor) -> torch.Tensor:

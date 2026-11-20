@@ -169,15 +169,10 @@ def _write_through_ctx(req: Req, tree_cache: BasePrefixCache):
 
 
 def maybe_cache_unfinished_req(req: Req, tree_cache: BasePrefixCache, **kwargs):
-    """EI entry point of the pre-v0.5.23 ``cache_unfinished_req`` callers:
-    checkpoint the request's fill ids up to ``req.extend_end``.
-
-    EI-UPGRADE-TODO: upstream v0.5.23 replaced ``cache_unfinished_req`` with
-    ``tree_cache.checkpoint(req, up_to=...)``: ``checkpoint_kv_cache`` while a
-    request runs, ``release_kv_cache(checkpoint=True)`` at its finish. Port the
-    remaining EI callers; legacy kwargs (``chunked``) are dropped. Unlike
-    checkpoint_kv_cache this does not assert the request is unfinished (EI's
-    symmetric export finish path calls it before release_kv_cache)."""
+    """Checkpoint the request's fill ids up to ``req.extend_end``, as
+    ``checkpoint_kv_cache`` does, without asserting that the request is
+    unfinished: the symmetric export finish path calls it before
+    ``release_kv_cache``. Keyword arguments are ignored."""
     if not _skips_unfinished_insert(req):
         with _write_through_ctx(req, tree_cache):
             tree_cache.checkpoint(req, up_to=req.extend_end)

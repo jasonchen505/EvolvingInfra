@@ -1036,13 +1036,7 @@ class ReqKvInfo:
         self.kv_allocated_len = 0
         self.component_evicted_seqlens.clear()
 
-    # EI compatibility: fields v0.5.23 moved into ReqKvInfo. The pre-v0.5.23
-    # spelling `kv.swa_evicted_seqlen` reads and writes the SWA entry of
-    # component_evicted_seqlens, so both spellings are one state. EI code in
-    # files no resolver owns (disaggregation/symmetric/*, decode.py, ...) still
-    # uses it.
-    # EI-UPGRADE-TODO: port those callers to get/set_evicted_seqlen(SWA) and
-    # drop this accessor.
+    # swa_evicted_seqlen reads and writes the SWA entry of component_evicted_seqlens.
     @property
     def swa_evicted_seqlen(self) -> int:
         return self.get_evicted_seqlen(ComponentType.SWA)
@@ -1325,12 +1319,9 @@ class Req(ReqDllmMixin):
         # ledger coverage after re-attaching in-flight spills. Set by the
         # retract, consumed by the resume.
         self.swa_resume_start: Optional[int] = None
-        # Whole components intentionally omitted by the matching acquire.  This
-        # must be replayed on release in addition to per-node tombstone skips.
-        # EI-UPGRADE-TODO: upstream v0.5.23 carries this in the lock receipt
-        # (req.lock.receipt.skipped_lock_components); move EI's readers and
-        # writers (decode, symmetric import, streaming session) to it, then
-        # drop this field.
+        # Whole components the matching acquire left untaken: a copy of
+        # req.lock.receipt.skipped_lock_components. A release replays the
+        # receipt, not this field.
         self.skip_lock_components: tuple = ()
 
         # Whether or not if it is chunked. It increments whenever
@@ -1725,14 +1716,7 @@ class Req(ReqDllmMixin):
             len(self.origin_input_ids) + len(self.output_ids_through_stop),
         )
 
-    # EI compatibility: fields v0.5.23 moved into ReqKvInfo. These delegate to
-    # self.kv, so the old Req-level spelling and req.kv.<name> are one state (a
-    # write through the old spelling must not create a stray Req attribute). EI
-    # code in files no resolver owns (disaggregation/symmetric/*,
-    # bootstrap_prefetch.py, publish_readback.py, sched_tracer.py, ...) still
-    # uses it.
-    # EI-UPGRADE-TODO: port those callers to req.kv.* / req.kv.holds_kv and
-    # drop these accessors.
+    # Req-level aliases that read and write self.kv (is_holding_kv: kv.holds_kv).
     @property
     def req_pool_idx(self) -> Optional[int]:
         return self.kv.req_pool_idx
@@ -4489,15 +4473,15 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
         if not self.forward_mode.is_decode():
             return
         tree_cache = self.tree_cache
-        # EI-UPGRADE-TODO: v0.5.23's maybe_evict_swa keys on swa_retain_window
-        # (max of the target and draft SWA windows); window residency still
-        # keys on the target window, as before the upgrade.
+        # The tree's sliding_window_size is its swa_retain_window (the larger of
+        # the target and draft SWA windows), the window maybe_evict_swa keeps.
         window = tree_cache.sliding_window_size
         page_size = tree_cache.page_size
         interval = max(1, envs.SGLANG_DSV4_SWA_SPILL_INTERVAL_PAGES.get()) * page_size
         legacy_interval = max(1, envs.SGLANG_SWA_EVICTION_INTERVAL.get())
-        # v0.5.23 renamed SGLANG_OPT_SWA_RELEASE_LEAF_LOCK_AFTER_WINDOW (kept as
-        # a deprecated alias); get() first so the alias counts as set.
+        # get() before is_set(): get() copies the deprecated alias
+        # SGLANG_OPT_SWA_RELEASE_LEAF_LOCK_AFTER_WINDOW into this variable, so a
+        # value set through the alias counts as set.
         release_env = envs.SGLANG_OPT_RELEASE_PREFILL_SWA
         release_value = release_env.get()
         release_leaf_lock = (
@@ -4528,8 +4512,8 @@ class ScheduleBatch(ScheduleBatchDisaggregationDecodeMixin):
                 hi = (req.seqlen - 1 - max(window, page_size)) // page_size * page_size
                 if hi - lo >= interval:
                     ranges.append((req, lo, hi))
-            # release_swa_prefix_lock releases the lock's SWA part once and
-            # skips a lock without one (v0.5.23 TreeLock.swa_released).
+            # release_swa_prefix_lock releases the lock's SWA part once
+            # (TreeLock.swa_released) and skips a lock without one.
             if (
                 release_leaf_lock
                 and req.seqlen - 1 - window - (num_draft + 1)

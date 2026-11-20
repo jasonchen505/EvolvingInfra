@@ -514,12 +514,12 @@ class DecodePreallocQueue(DecodeHiCachePreallocMixin):
         self.metadata_buffers = metadata_buffers
         self.req_to_metadata_buffer_idx_allocator = req_to_metadata_buffer_idx_allocator
         self.scheduler = scheduler
-        # Upstream (#40857) allows EAGLE/EAGLE3 with the decode radix cache on
-        # any model. EI keeps its fail-closed layout check for the HiCache host
-        # tier only, the path its packed EAGLE restore was validated on (DSA
-        # target/draft at shared indices, native flat-MLA EAGLE3).
-        # EI-UPGRADE-TODO: reconcile with upstream's EAGLE decode HiCache
-        # restore, then drop this check.
+        # The decode radix cache takes EAGLE and EAGLE3 on any model. With a
+        # HiCache host tier, this check fails closed unless EAGLE has DSA
+        # target and draft pools at shared indices or EAGLE3 the native
+        # flat-MLA layout.
+        # TODO: restore EAGLE and EAGLE3 drafts from the host tier on other
+        # layouts, and drop this check.
         if (
             get_disagg().disaggregation_decode_enable_radix_cache
             and get_memory().enable_hierarchical_cache

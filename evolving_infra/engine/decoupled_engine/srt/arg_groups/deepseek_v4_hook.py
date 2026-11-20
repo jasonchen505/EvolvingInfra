@@ -258,13 +258,10 @@ def validate_deepseek_v4_vision(server_args: ServerArgs) -> None:
         hf_config, "vision_n_layers", 0
     ):
         return
-    # EI-UPGRADE: DeepSeek-V4.1 vision is upstream's in-model path
-    # (validate_deepseek_v41_features); these checks cover EI's DeepSeek-V4
-    # (Flash) vision port only.
+    # These checks cover DeepSeek-V4 (Flash) vision only. DeepSeek-V4.1 runs
+    # vision in-model; validate_deepseek_v41_features validates it.
     if getattr(hf_config, "model_type", None) == "deepseek_v41":
         return
-    # EI-UPGRADE: upstream folded --enable-dsa-prefill-context-parallel into
-    # strategy prefill CP (--enable-prefill-cp, CP V1 deprecation).
     if cfg.enable_prefill_cp:
         raise ValueError(
             "DeepSeek-V4 vision does not support prefill context parallelism."

@@ -4981,8 +4981,8 @@ class DeepseekV4AttnBackend(
         """Build variable-size image windows for an eager, non-CP prefill."""
         if forward_batch is None or not forward_batch.contains_image_inputs():
             return None
-        # EI-UPGRADE: the windows are EI's DeepSeek-V4 (Flash) vision layout;
-        # DeepSeek-V4.1 image prefill is upstream's path and takes none.
+        # The windows are the DeepSeek-V4 (Flash) vision layout; DeepSeek-V4.1
+        # image prefill takes none.
         if getattr(self, "is_dsv41", False):
             return None
         if cp_v2_active or use_prefill_cuda_graph:

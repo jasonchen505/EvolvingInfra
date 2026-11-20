@@ -1116,10 +1116,6 @@ class SchedulerDisaggregationPrefillMixin(NeedAdmissionMixin):
         # ahead of the routing sample and the state push. None when off (no
         # call).
         kv_events_end_pass = kv_events_end_pass_hook(self)
-        # EI-UPGRADE-TODO: upstream's continuous input polling (opt-in,
-        # SGLANG_ENABLE_DISAGG_PREFILL_CONTINUOUS_INPUT_POLLING) has not been
-        # validated together with EI's opt-in loop features (launch thread,
-        # result-first reorder, M2/M4, late D, state push).
         batch_result_completion_status = torch.empty(1, dtype=torch.int32, device="cpu")
         # True when intake repeats while the oldest batch result is unfinished.
         waiting_for_batch_result = False

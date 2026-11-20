@@ -1275,8 +1275,8 @@ class HybridCacheController(BaseHiCacheController):
                 )
             )
 
-        # EI-UPGRADE-TODO: the PP prefetch ticket below does not carry
-        # kv_pull_hint (peer KV with PP > 1 is not supported).
+        # TODO: carry kv_pull_hint on the PP prefetch ticket below; without it,
+        # peer KV is not supported with PP > 1.
         if self.storage_config.pp_rank != 0:
             raise RuntimeError("Only PP0 can submit a PP prefetch ticket.")
 

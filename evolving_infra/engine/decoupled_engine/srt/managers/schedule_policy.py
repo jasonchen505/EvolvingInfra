@@ -969,11 +969,6 @@ class PrefillAdder:
     def cur_rem_tokens(self):
         return self.memory_budget.remaining_current
 
-    # EI compatibility: v0.5.23 moved these offsets into memory_budget. The
-    # symmetric routing snapshot (scheduler_components/prefill_routing_snapshot.py,
-    # which no resolver owns) still reads the old names.
-    # EI-UPGRADE-TODO: port that reader to memory_budget.total_offset /
-    # current_offset and drop these two read-only accessors.
     @property
     def rem_total_token_offset(self):
         return self.memory_budget.total_offset

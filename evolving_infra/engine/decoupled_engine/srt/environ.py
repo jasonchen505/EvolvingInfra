@@ -1034,9 +1034,9 @@ class Envs:
     # rank logs "LAUNCH_THREAD ..." every 60 s
     # (disaggregation/prefill_launch_thread.py).
     SGLANG_PREFILL_LAUNCH_THREAD = EnvBool(False)
-    # 6g: the Mooncake transfer worker waits for an early send's
-    # _early_send_wait_event (the forward in flight when it was issued) on its
-    # own thread before posting the RDMA read. Also turned on by the umbrella.
+    # 6g: accepted and has no effect. The Mooncake transfer worker posts the
+    # RDMA read without waiting for an early send's forward; 6d orders the send
+    # after that forward instead.
     SGLANG_MOONCAKE_EARLY_SEND_WAIT = EnvBool(False)
     # M4 Q4: the PD prefill worker keeps every
     # page id of the full KV pool on the CPU (mem_cache/cpu_page_book.py): CPU
@@ -1190,9 +1190,8 @@ class Envs:
     # ===================================================================
     # Radix and sparse KV caches
     # ===================================================================
-    # EI-UPGRADE-TODO: v0.5.23 removed the C++ radix tree (#40775) and this
-    # switch; it stays defined only while EI's KV-session-retention check in
-    # mem_cache/registry.py (create_tree_cache) still reads it.
+    # Selects no tree cache. Only the KV-session-retention check in
+    # create_tree_cache (mem_cache/registry.py) reads it, and rejects it.
     SGLANG_EXPERIMENTAL_CPP_RADIX_TREE = EnvBool(False)
     SGLANG_RADIX_FORCE_MISS = EnvBool(False)
     SGLANG_CHUNKED_PREFIX_CACHE_THRESHOLD = EnvInt(8192)
@@ -1260,11 +1259,10 @@ class Envs:
     SGLANG_KV_EVENTS_WIRE_FORMAT = EnvStr("ei_array")
     # Decode batches between SWA out-of-window evictions.
     SGLANG_SWA_EVICTION_INTERVAL = EnvInt(128)
-    # Deprecated: the unified radix tree is the default tree cache now, so the
-    # registry no longer reads this. Kept because a few model/arch call sites
-    # still assert on it; do not use in new code.
-    # EI-UPGRADE-TODO: v0.5.23 removed this switch; it stays defined only while
-    # EI's decode radix-cache guard (mem_cache/kv_cache_builder.py) reads it.
+    # Deprecated; do not use in new code. The unified radix tree is the default
+    # tree cache whatever its value. Only the hybrid-SWA check in
+    # _validate_decode_radix_cache_compatibility (mem_cache/kv_cache_builder.py)
+    # reads it.
     SGLANG_ENABLE_UNIFIED_RADIX_TREE = EnvBool(False)
     # The tree-core registry falls back to Python for:
     # - Session-aware caching.

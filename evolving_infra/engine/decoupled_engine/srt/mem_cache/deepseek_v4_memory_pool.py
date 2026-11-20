@@ -1323,13 +1323,11 @@ class DeepSeekV4TokenToKVPool(BaseSWAKVPool):
 
     # --- cpu_tensor retraction backup (PD decode) --------------------------
     #
-    # EI-UPGRADE-TODO: upstream v0.5.23 recomputes a retracted DeepSeek-V4
-    # request on the prefill instead (common.dsv4_needs_rebootstrap, #43936),
-    # and backup_kv_cache takes that path before cpu_tensor, so nothing calls
-    # get_cpu_copy / load_cpu_copy below any more. They are kept (signatures
-    # moved to upstream's req_pool_index) for a later opt-in; the guard now
-    # also rejects the pool layouts upstream added since (V4.1 low ratios,
-    # request window / SWA ring, SM120 64-token SWA pages, FP4 aiter indexer).
+    # Nothing calls get_cpu_copy / load_cpu_copy below: backup_kv_cache
+    # recomputes a retracted DeepSeek-V4 request on the prefill
+    # (common.dsv4_needs_rebootstrap) before it reaches cpu_tensor.
+    # TODO: an opt-in that retracts DeepSeek-V4 requests through this backup
+    # instead of the recompute.
     #
     # Page-granular D2H snapshot / H2D restore of every component holding
     # per-request state: the c4 / c128 / indexer packed pages (their physical

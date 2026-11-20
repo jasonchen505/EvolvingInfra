@@ -751,9 +751,10 @@ class KimiK2_5VLImageProcessor(KimiGridMMDataMixin, SGLangBaseProcessor):
                 # The prepared hash/pad are authoritative, as on the metadata-only
                 # path above: drop the wide identity assign_kimi_image_identities
                 # set, so padding_values() is (pad_value,) on every leg.
-                # EI-UPGRADE-TODO: prepared layouts still use scalar pads, so they
-                # share no radix prefix with native requests for the same image,
-                # which now carry upstream's wide identity.
+                # TODO: let prepared layouts share radix prefixes with native
+                # requests for the same image. Prepared layouts use scalar pads
+                # and native requests the wide identity, so their image tokens
+                # never match.
                 item.identity = None
                 item.pad_values = None
                 item.model_specific_data.update(

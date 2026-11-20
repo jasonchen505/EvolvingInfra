@@ -745,8 +745,8 @@ def _deepseek_v4_num_host_pages(
             get_memory().hicache_ratio,
         )
         full_host_pages = (host_tokens + page_size - 1) // page_size
-        # EI-UPGRADE-TODO: C128 is sized as the KV-derived (GPU) sidecar; an
-        # independent NPU C128 pool (c128_attn_allocator) is not sized here.
+        # TODO: size an independent NPU C128 pool (c128_attn_allocator) here;
+        # C128 takes the page count of the KV-derived (GPU) sidecar.
         return (
             full_host_pages,
             (host_tokens + swa_page_size - 1) // swa_page_size,
@@ -892,8 +892,8 @@ def _dsv4_host_bytes_per_page(
         # scale (and the NPU split), each mirrored by its own host pool.
         for region in _dsv4_indexer_regions(kvcache, page_size):
             total += len(region.device_buffers) * region.item_bytes
-        # EI-UPGRADE-TODO: the unified-fp8 rope siblings (_dsv4_rope_sibling)
-        # and the DSv4.1 low-ratio (C1/C2) pools are not counted here.
+        # TODO: count the unified-fp8 rope siblings (_dsv4_rope_sibling) and
+        # the DSv4.1 low-ratio (C1/C2) pools.
         if not is_unified_kv:
             for state_pools in (
                 kvcache.compress_state_pools,
@@ -1917,9 +1917,9 @@ def build_deepseek_v4_hicache_stack(
         if c128_rope_entry is not None:
             entries.append(c128_rope_entry)
 
-    # EI-UPGRADE-TODO: the DSv4.1 low-ratio (C1/C2) pools are not host-deduped
-    # (every rank keeps its own copy) and are not counted in the window-
-    # residency bytes per page (_dsv4_host_bytes_per_page).
+    # TODO: host-dedup the DSv4.1 low-ratio (C1/C2) pools (every rank keeps its
+    # own copy) and count them in the window-residency bytes per page
+    # (_dsv4_host_bytes_per_page).
     entries.extend(
         _dsv4_low_ratio_entries(
             kvcache, page_size, num_host_pages, transfer_layer_id_max

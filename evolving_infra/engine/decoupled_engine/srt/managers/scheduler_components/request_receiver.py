@@ -249,10 +249,9 @@ class SchedulerRequestReceiver:
                 work_reqs = None
                 control_reqs = None
 
-            # EI-UPGRADE-TODO: upstream's attn_cp_tp_broadcast_pyobj has no
-            # size_sink, so the E17 broadcast_readout counts no bytes for the
-            # DP-attention work/control broadcasts (seconds still count). Add a
-            # size_sink passthrough to distributed/communication_op.py.
+            # TODO: pass size_sink through attn_cp_tp_broadcast_pyobj
+            # (distributed/communication_op.py); broadcast_readout counts the
+            # seconds of its broadcasts below but not their bytes.
             work_reqs = attn_cp_tp_broadcast_pyobj(work_reqs)
 
             # When dp_attention_local_control_broadcast is enabled, each DP

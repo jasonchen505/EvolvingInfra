@@ -364,12 +364,9 @@ class DecodeHiCacheTransferMixin:
             op_log.poll()
 
     def _process_hicache_local_restores(self, decode_reqs: List[DecodeRequest]) -> None:
-        # EI-UPGRADE-TODO: this is upstream's restore state machine (lockstep
-        # load-back slot, readiness folded into the MIN-reduced KV poll, no
-        # rank-local collectives here). It replaces EI's per-tick gloo agreement
-        # (_restore_flags_on_all_ranks) and EI's load_back_pending path walk.
-        # Verify GLM EAGLE decode HiCache with host dedup on GPU (no hang, no
-        # stale draft rows).
+        # Load-back slots free up in lockstep on every rank, and a restore's
+        # readiness enters the MIN-reduced KV poll (HiCacheRestoreGatedKVReceiver),
+        # so this method runs no collectives.
         if not hasattr(self.tree_cache, "is_load_back_event_done"):
             return
         op_log = self._hicache_restore_op_log()
