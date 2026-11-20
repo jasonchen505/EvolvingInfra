@@ -4049,7 +4049,6 @@ class DeepseekV4Model(nn.Module):
                 forward_batch=forward_batch,
                 num_tokens=input_ids.shape[0],
                 tail_in_graph=tail_in_graph,
-                late_dp_counts=late_dp_counts,
             )
         tail_sentinel = positions.new_zeros((1,)) if tail_in_graph else None
         saved_full = None
