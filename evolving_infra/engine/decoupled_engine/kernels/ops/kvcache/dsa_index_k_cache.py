@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/kernels/ops/attention/dsa/index_buf_accessor.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/kernels/ops/kvcache/dsa_index_k_cache.py (commit 297e54fd10), modified for evolving-infra.
 from typing import TYPE_CHECKING
 
 import torch

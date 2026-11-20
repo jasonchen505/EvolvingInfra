@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/entrypoints/grpc_bridge.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/entrypoints/grpc_bridge.py (commit 297e54fd10), modified for evolving-infra.
 """Python-side bridge between the Rust gRPC server and TokenizerManager.
 
 The RuntimeHandle exposes synchronous methods that Rust can call via PyO3

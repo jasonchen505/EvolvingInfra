@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/unified_tree_core.py (commit 297e54fd10), modified for evolving-infra.
 """The radix tree mechanism.
 
 ``UnifiedTreeCore`` owns the tree's member-var state -- the tree structure (root

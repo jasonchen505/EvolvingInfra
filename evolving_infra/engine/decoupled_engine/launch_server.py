@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/launch_server.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/launch_server.py (commit 297e54fd10), modified for evolving-infra.
 """Launch the inference server."""
 
 import asyncio

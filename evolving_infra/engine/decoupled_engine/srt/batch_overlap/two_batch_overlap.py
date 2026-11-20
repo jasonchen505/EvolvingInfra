@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/batch_overlap/two_batch_overlap.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/batch_overlap/two_batch_overlap.py (commit 297e54fd10), modified for evolving-infra.
 from __future__ import annotations
 
 import copy

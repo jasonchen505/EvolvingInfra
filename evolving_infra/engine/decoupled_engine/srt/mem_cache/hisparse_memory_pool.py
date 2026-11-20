@@ -1,5 +1,4 @@
 # mapping on device memory, host memory and memory allocator
-# Adapted from SGLang python/sglang/srt/mem_cache/hisparse_memory_pool.py (commit 9a489f8d2f), modified for evolving-infra.
 
 import logging
 from typing import Optional

@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/layers/attention/dsv4/sparse_prefill_utils.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/layers/attention/dsv4/sparse_prefill_utils.py (commit 297e54fd10), modified for evolving-infra.
 """Per-query sparse-index combiner for the FlashMLA sparse prefill path.
 
 Adapts vllm's ``combine_topk_swa_indices`` to sglang's flat-workspace layout.

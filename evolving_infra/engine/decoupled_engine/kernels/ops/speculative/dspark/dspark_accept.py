@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/kernels/ops/speculative/dspark/dspark_accept.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/kernels/ops/speculative/dspark/dspark_accept.py (commit 297e54fd10), modified for evolving-infra.
 from __future__ import annotations
 
 from functools import partial

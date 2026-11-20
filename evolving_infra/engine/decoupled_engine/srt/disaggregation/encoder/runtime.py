@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/srt/disaggregation/encoder/runtime.py (commit 9a489f8d2f), modified for evolving-infra.
 """Protocol-neutral runtime for the EPD encoder server.
 
 The current runtime keeps :class:`EncoderScheduler` and the rank-0

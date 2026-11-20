@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/srt/function_call/deepseekv32_detector.py (commit 9a489f8d2f), modified for evolving-infra.
 import json
 import logging
 import re

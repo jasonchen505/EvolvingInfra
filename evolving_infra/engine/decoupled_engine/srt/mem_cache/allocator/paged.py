@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/allocator/paged.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/allocator/paged.py (commit 297e54fd10), modified for evolving-infra.
 """
 Copyright 2025 SGLang Team
 Licensed under the Apache License, Version 2.0 (the "License");

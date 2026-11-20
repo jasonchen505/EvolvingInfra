@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from SGLang python/sglang/srt/arg_groups/serving_hook.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/arg_groups/serving_hook.py (commit 297e54fd10), modified for evolving-infra.
 """Server-argument resolution for serving-surface and multimodal entry validation."""
 
 from __future__ import annotations

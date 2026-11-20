@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/swa_memory_pool.py (commit 9a489f8d2f), modified for evolving-infra.
 import logging
 from typing import Dict, List, Optional, Tuple
 

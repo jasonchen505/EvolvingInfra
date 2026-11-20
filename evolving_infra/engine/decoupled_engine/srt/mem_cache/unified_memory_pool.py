@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_memory_pool.py (commit 9a489f8d2f), modified for evolving-infra.
 """UnifiedKVPool -- one physical `uint8` byte buffer shared by N sub-pools.
 
 Two END `MultiEndedAllocator`s grow inward from opposite ends; optional

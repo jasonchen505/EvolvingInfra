@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/disaggregation/prefill.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/disaggregation/prefill.py (commit 297e54fd10), modified for evolving-infra.
 """
 Life cycle of a request in the prefill server
 

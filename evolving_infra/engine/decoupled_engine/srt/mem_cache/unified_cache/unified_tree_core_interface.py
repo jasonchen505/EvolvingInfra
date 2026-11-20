@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/unified_tree_core_interface.py (commit 297e54fd10), modified for evolving-infra.
 """Interface of the TreeCore: the radix tree mechanism that owns the tree
 structure, per-node values, the LRU(s), and bookkeeping. The Controller drives a
 TreeCore exclusively through this surface, so an alternative implementation (e.g.

@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/srt/hardware_backend/npu/memory_pool_npu.py (commit 9a489f8d2f), modified for evolving-infra.
 from typing import TYPE_CHECKING, Optional, Sequence
 
 import torch

@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-# Adapted from SGLang python/sglang/srt/configs/model_config.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/configs/model_config.py (commit 297e54fd10), modified for evolving-infra.
 
 import copy
 import json

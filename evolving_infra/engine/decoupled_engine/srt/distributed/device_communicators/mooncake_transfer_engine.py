@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/distributed/device_communicators/mooncake_transfer_engine.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/distributed/device_communicators/mooncake_transfer_engine.py (commit 297e54fd10), modified for evolving-infra.
 from __future__ import annotations
 
 import json

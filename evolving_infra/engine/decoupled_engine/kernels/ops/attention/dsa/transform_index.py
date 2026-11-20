@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/kernels/ops/attention/dsa/transform_index.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/kernels/ops/attention/dsa/transform_index.py (commit 297e54fd10), modified for evolving-infra.
 from itertools import accumulate
 from typing import List, Optional
 

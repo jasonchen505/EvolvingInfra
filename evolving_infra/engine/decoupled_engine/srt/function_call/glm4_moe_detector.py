@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/function_call/glm4_moe_detector.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/function_call/glm4_moe_detector.py (commit 297e54fd10), modified for evolving-infra.
 import hashlib
 import json
 import logging

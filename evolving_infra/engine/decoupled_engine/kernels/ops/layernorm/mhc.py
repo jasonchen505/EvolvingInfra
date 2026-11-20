@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/kernels/ops/layernorm/mhc.py (commit 9a489f8d2f), modified for evolving-infra.
 import functools
 import importlib
 import logging

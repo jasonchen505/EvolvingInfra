@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-# Adapted from SGLang python/sglang/srt/mem_cache/dsa_cache_layer_split.py (commit 9a489f8d2f), modified for evolving-infra.
 
 """Layer-sharded DSA KV cache pool for context-parallel prefill.
 

@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/model_executor/pool_configurator.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/model_executor/pool_configurator.py (commit 297e54fd10), modified for evolving-infra.
 """Memory pool configurators for profiling and sizing KV cache pools.
 
 Each model architecture has its own configurator that computes pool sizes

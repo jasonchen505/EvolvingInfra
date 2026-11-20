@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/radix_cache.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/radix_cache.py (commit 297e54fd10), modified for evolving-infra.
 from __future__ import annotations
 
 from decoupled_engine.srt.mem_cache.cache_init_params import CacheInitParams

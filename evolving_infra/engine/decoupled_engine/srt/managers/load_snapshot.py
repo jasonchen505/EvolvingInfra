@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/managers/load_snapshot.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/managers/load_snapshot.py (commit 297e54fd10), modified for evolving-infra.
 """Load snapshot: publish scheduler load metrics for DP balancing and /v1/loads.
 
 Architecture

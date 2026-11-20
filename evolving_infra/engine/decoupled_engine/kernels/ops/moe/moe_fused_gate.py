@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/kernels/ops/moe/moe_fused_gate.py (commit 9a489f8d2f), modified for evolving-infra.
 from __future__ import annotations
 
 from typing import Dict, Optional, Tuple

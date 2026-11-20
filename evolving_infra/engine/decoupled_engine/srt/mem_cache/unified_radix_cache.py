@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_radix_cache.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_radix_cache.py (commit 297e54fd10), modified for evolving-infra.
 """Coordinate unified GPU/host cache operations, async IO ACKs and peer returns.
 
 The tree core owns residency and eviction; this layer applies transfer results

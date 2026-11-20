@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/components/__init__.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/components/__init__.py (commit 297e54fd10), modified for evolving-infra.
 from decoupled_engine.srt.mem_cache.unified_cache.components.base import (
     _NUM_COMPONENT_TYPES,
     BASE_COMPONENT_TYPE,

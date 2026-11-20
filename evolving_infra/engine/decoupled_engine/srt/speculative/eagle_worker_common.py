@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/speculative/eagle_worker_common.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/speculative/eagle_worker_common.py (commit 297e54fd10), modified for evolving-infra.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional

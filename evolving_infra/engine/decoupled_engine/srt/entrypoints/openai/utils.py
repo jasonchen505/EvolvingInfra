@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/entrypoints/openai/utils.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/entrypoints/openai/utils.py (commit 297e54fd10), modified for evolving-infra.
 import logging
 from typing import Any, Literal
 

@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/kernels/ops/attention/dsv4_attn_metadata_kernels.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/kernels/ops/attention/dsv4/attn_metadata_kernels.py (commit 297e54fd10), modified for evolving-infra.
 from __future__ import annotations
 
 from typing import Optional

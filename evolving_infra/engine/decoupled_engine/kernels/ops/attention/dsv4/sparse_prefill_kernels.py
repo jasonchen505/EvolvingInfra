@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/kernels/ops/attention/dsv4/sparse_prefill_kernels.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/kernels/ops/attention/dsv4/sparse_prefill_kernels.py (commit 297e54fd10), modified for evolving-infra.
 """SWA token-id build and topk+SWA index combine kernels for DSV4 sparse prefill.
 
 Migrated from ``decoupled_engine.srt.layers.attention.dsv4.sparse_prefill_utils`` (RFC #29630, Phase 2.5).

@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/cache_action.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/cache_action.py (commit 297e54fd10), modified for evolving-infra.
 """A TreeCore emits CacheActions through the TreeCoreInterface to guide
 Controller behavior.
 """

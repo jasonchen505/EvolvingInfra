@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/hardware_backend/npu/dsv4/dsv4_memory_pool.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/hardware_backend/npu/dsv4/dsv4_memory_pool.py (commit 297e54fd10), modified for evolving-infra.
 """NPU-only KV pool variant for DeepSeek-V4.
 
 The full/SWA/C4/C128 KV buffers keep their Ascend-specific PA_ND layout. The

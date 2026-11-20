@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-# Adapted from SGLang python/sglang/srt/layers/moe/mega_moe.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/layers/moe/mega_moe.py (commit 297e54fd10), modified for evolving-infra.
 """Mega-MoE forward path and expert-weight prep shared by Deepseek V2/V4."""
 
 from __future__ import annotations

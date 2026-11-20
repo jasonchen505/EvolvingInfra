@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/session_ref_tracker.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/session_ref_tracker.py (commit 297e54fd10), modified for evolving-infra.
 """Native session references and optional versioned CPU KV retention.
 
 Native streaming-session semantics are unchanged. ``KvSessionRetention`` tracks

@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/multimodal/processors/kimi_k25.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/multimodal/processors/kimi_k25.py (commit 297e54fd10), modified for evolving-infra.
 import hashlib
 import io
 import math

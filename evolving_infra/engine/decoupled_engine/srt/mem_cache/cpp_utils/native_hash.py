@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/cpp_utils/native_hash.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/cpp_utils/native_hash.py (commit 297e54fd10), modified for evolving-infra.
 import os
 import platform
 import sys

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Adapted from SGLang python/sglang/srt/arg_groups/pipeline.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/arg_groups/pipeline.py (commit 297e54fd10), modified for evolving-infra.
 """Ordered configuration resolution, called by ``ServerArgs.resolve_once``."""
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/utils/device_timer.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/utils/device_timer.py (commit 297e54fd10), modified for evolving-infra.
 import threading
 from collections import deque
 from contextlib import contextmanager, nullcontext

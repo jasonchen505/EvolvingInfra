@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/registry.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/registry.py (commit 297e54fd10), modified for evolving-infra.
 """Registry for pluggable RadixCache factories.
 
 If `--radix-cache-backend` is unset (by default), the built-in selection

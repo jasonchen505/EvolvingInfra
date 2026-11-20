@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/srt/session/streaming_session.py (commit 9a489f8d2f), modified for evolving-infra.
 from __future__ import annotations
 
 import logging

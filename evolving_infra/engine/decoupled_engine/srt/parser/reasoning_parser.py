@@ -1,4 +1,3 @@
-# Adapted from SGLang python/sglang/srt/parser/reasoning_parser.py (commit 9a489f8d2f), modified for evolving-infra.
 import inspect
 import re
 from typing import Dict, List, Optional, Tuple, Type

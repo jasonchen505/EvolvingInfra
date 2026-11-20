@@ -1,4 +1,4 @@
-# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/storage_attachment.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/mem_cache/unified_cache/storage_attachment.py (commit 297e54fd10), modified for evolving-infra.
 """Runtime attach / detach of the HiCache (L3) storage backend.
 
 ``UnifiedRadixCache`` owns the tree; this component owns the lifecycle of the

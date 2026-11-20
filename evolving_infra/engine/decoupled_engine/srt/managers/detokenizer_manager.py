@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-# Adapted from SGLang python/sglang/srt/managers/detokenizer_manager.py (commit 9a489f8d2f), modified for evolving-infra.
+# Adapted from SGLang python/sglang/srt/managers/detokenizer_manager.py (commit 297e54fd10), modified for evolving-infra.
 """DetokenizerManager is a process that detokenizes the token ids."""
 
 import dataclasses
