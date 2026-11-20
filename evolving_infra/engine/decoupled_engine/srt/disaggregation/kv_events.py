@@ -993,15 +993,26 @@ class ZmqEventPublisher(EventPublisher):
             return
         client_id, _, start_seq_bytes = frame
         start_seq = int.from_bytes(start_seq_bytes, "big")
+        # The EI wire keeps the replay framing EI's consumers read (the router's
+        # KV-event bridge): (seq, payload) after the delimiter, no topic frame.
+        legacy = self._wire_format == KV_EVENTS_WIRE_EI_ARRAY
 
         for seq, buf in self._buffer:
             if seq >= start_seq:
+                if legacy:
+                    self._replay.send_multipart(
+                        (client_id, b"", seq.to_bytes(8, "big"), buf)
+                    )
+                    continue
                 # Subscribers receive the same topic, sequence, and payload as live events.
                 self._replay.send_multipart(
                     (client_id, b"", self._topic_bytes, seq.to_bytes(8, "big"), buf)
                 )
         # Send end of sequence marker
-        self._replay.send_multipart((client_id, b"", b"", self.END_SEQ, b""))
+        if legacy:
+            self._replay.send_multipart((client_id, b"", self.END_SEQ, b""))
+        else:
+            self._replay.send_multipart((client_id, b"", b"", self.END_SEQ, b""))
 
     @staticmethod
     def offset_endpoint_port(
