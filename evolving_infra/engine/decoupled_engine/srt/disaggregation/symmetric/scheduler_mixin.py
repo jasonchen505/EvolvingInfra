@@ -484,6 +484,7 @@ class SchedulerSymmetricMixin:
             buffer_size,
             hidden_size=disagg_hidden_size,
             hidden_states_dtype=disagg_hidden_states_dtype,
+            max_sampling_mask_tokens=self.server_args.sampling_mask_max_tokens,
             custom_mem_pool=self.token_to_kv_pool_allocator.get_kvcache().maybe_get_custom_mem_pool(),
             output_dsa_topk_indices_dim=output_dsa_topk_indices_dim,
         )
