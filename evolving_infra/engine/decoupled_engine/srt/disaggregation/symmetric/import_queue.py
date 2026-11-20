@@ -1687,41 +1687,46 @@ class ImportQueue:
         way."""
         full_only = content_only or self.swa_window
         if full_only:
-            from decoupled_engine.srt.mem_cache.unified_cache.components import ComponentType
+            from decoupled_engine.srt.mem_cache.unified_cache.component_type import (
+                ComponentType,
+            )
 
             lock = self.tree_cache.inc_lock_ref(
                 req.last_node, skip_lock_components=(ComponentType.SWA,)
             )
         else:
             lock = self.tree_cache.inc_lock_ref(req.last_node)
-        req.swa_uuid_for_lock = getattr(lock, "swa_uuid_for_lock", None)
-        req.skip_lock_node_ids = getattr(lock, "skip_lock_node_ids", {}) or {}
-        req.skip_lock_components = getattr(lock, "skip_lock_components", ()) or ()
+        # v0.5.23 lock API: the acquire returns a receipt (IncLockRefResult) that
+        # the release must replay on the same node (DecLockRefParams).
+        req.import_prefix_lock_receipt = (
+            lock.to_dec_params() if hasattr(lock, "to_dec_params") else None
+        )
+        req.skip_lock_components = tuple(
+            getattr(lock, "skipped_lock_components", ()) or ()
+        )
         req.swa_prefix_lock_released = full_only
 
     def _release_prefix_lock(self, req: Req) -> None:
         """Undo the inc_lock_ref taken in _prealloc (mirrors upstream
         DecodePreallocQueue._release_matched_prefix_lock)."""
+        params = getattr(req, "import_prefix_lock_receipt", None)
         try:
-            from decoupled_engine.srt.mem_cache.base_prefix_cache import DecLockRefParams
-
-            params = DecLockRefParams(
-                swa_uuid_for_lock=getattr(req, "swa_uuid_for_lock", None),
-                skip_lock_node_ids=getattr(req, "skip_lock_node_ids", {}) or {},
-                skip_lock_components=getattr(req, "skip_lock_components", ()) or (),
-            )
-            if req.swa_prefix_lock_released:
-                self.tree_cache.dec_lock_ref(req.last_node, params, skip_swa=True)
+            if params is None:
+                logger.warning(
+                    "flex-pd import rid=%s: no prefix-lock receipt to release", req.rid
+                )
             else:
-                self.tree_cache.dec_lock_ref(req.last_node, params)
-        except TypeError:
-            self.tree_cache.dec_lock_ref(req.last_node)
+                # The receipt already lists the components the acquire skipped
+                # (FULL-only locks skip SWA); skip_swa keeps EI's early-SWA-release mark.
+                self.tree_cache.dec_lock_ref(
+                    req.last_node, params, skip_swa=bool(req.swa_prefix_lock_released)
+                )
         except Exception as e:  # never let lock bookkeeping kill the scheduler
             logger.warning(
                 "symmetric-pd import rid=%s: releasing prefix lock failed (%r)", req.rid, e
             )
         req.last_node = None
-        req.swa_uuid_for_lock = None
+        req.import_prefix_lock_receipt = None
         req.skip_lock_components = ()
         req.swa_prefix_lock_released = False
 
@@ -2073,7 +2078,7 @@ class ImportQueue:
         if req.is_holding_kv:
             # Nothing valid was written; never insert into the radix tree.
             # (Window residency: this also releases a ledger/backfill.)
-            release_kv_cache(req, self.tree_cache, is_insert=False)
+            release_kv_cache(req, self.tree_cache, checkpoint=False)
         import torch
 
         req.prefix_indices = torch.empty((0,), dtype=torch.int64)

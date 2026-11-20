@@ -109,7 +109,7 @@ def _release_insert_chunked(sched: Scheduler) -> bool:
     chunked prefill; otherwise the flag stays inactive."""
     if not envs.SGLANG_SYMMETRIC_RELEASE_INSERT_CHUNKED.get():
         return False
-    from decoupled_engine.srt.mem_cache.unified_cache.components.tree_component import (
+    from decoupled_engine.srt.mem_cache.unified_cache.component_type import (
         ComponentType,
     )
     from decoupled_engine.srt.mem_cache.unified_radix_cache import UnifiedRadixCache
@@ -1736,7 +1736,7 @@ class SchedulerSymmetricMixin:
         if reason == COMPUTE_ABORT:
             self._symmetric_stop_computed(req, reason)
             if req.is_holding_kv:
-                release_kv_cache(req, self.tree_cache, is_insert=False)
+                release_kv_cache(req, self.tree_cache, checkpoint=False)
             return
         if reason == LATE_READER_GONE:
             # Rule X: the reader of a held late P-leg gave up; 503, no
@@ -1802,7 +1802,7 @@ class SchedulerSymmetricMixin:
             # Inserts the (finished) request's prefix into the radix tree and
             # frees the rest, exactly like a Local finish.
             if isinstance(req.finished_reason, FINISH_ABORT):
-                release_kv_cache(req, self.tree_cache, is_insert=False)
+                release_kv_cache(req, self.tree_cache, checkpoint=False)
             else:
                 if (
                     req.swa_branching_seqlen is not None
@@ -1812,7 +1812,7 @@ class SchedulerSymmetricMixin:
                     # the branching point; the finish insert stops there instead.
                     self.export_table.reopen_swa_branch_window(req)
                     maybe_cache_unfinished_req(req, self.tree_cache)
-                release_kv_cache(req, self.tree_cache)
+                release_kv_cache(req, self.tree_cache, checkpoint=True)
 
     def _symmetric_import_fallback(self: Scheduler, req: Req, reason: str) -> None:
         """Import failed / timed out: recompute locally."""

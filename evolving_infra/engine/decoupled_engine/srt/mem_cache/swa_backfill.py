@@ -59,7 +59,7 @@ import torch
 from decoupled_engine.srt.environ import envs
 from decoupled_engine.srt.mem_cache.hicache_storage import PoolName
 from decoupled_engine.srt.mem_cache.peer_kv_namespace import peer_page_keys
-from decoupled_engine.srt.mem_cache.unified_cache.components.tree_component import (
+from decoupled_engine.srt.mem_cache.unified_cache.component_type import (
     ComponentType,
 )
 from decoupled_engine.srt.mem_cache.unified_cache.swa_ledger import SwaHostLedger, SwaSegment

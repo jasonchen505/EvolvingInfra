@@ -313,6 +313,7 @@ class Glm47MoeDetector(BaseFormatDetector):
 
     def __init__(self):
         super().__init__()
+        self.use_full_assistant_constraint = False
         self.bot_token = "<tool_call>"
         self.eot_token = "</tool_call>"
         self.func_call_regex = r"<tool_call>.*?</tool_call>"
@@ -732,9 +733,9 @@ class Glm47MoeDetector(BaseFormatDetector):
                 pairs = self.func_arg_regex.findall(func_args_raw)
                 if pairs:
                     arguments = self._parse_argument_pairs(pairs, func_name, tools)
-                    self.prev_tool_call_arr[self.current_tool_id][
-                        "arguments"
-                    ] = arguments
+                    self.prev_tool_call_arr[self.current_tool_id]["arguments"] = (
+                        arguments
+                    )
             except Exception as e:
                 logger.debug(f"Failed to parse arguments: {e}", exc_info=True)
 
@@ -935,6 +936,9 @@ class Glm47MoeDetector(BaseFormatDetector):
             known_arguments[arg_key] = arguments[arg_key]
 
         return arguments
+
+    def parses_required_natively(self) -> bool:
+        return self.use_full_assistant_constraint
 
     def supports_structural_tag(self) -> bool:
         return _glm47_native_structural_tag_available()

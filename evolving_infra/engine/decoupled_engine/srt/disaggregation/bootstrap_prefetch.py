@@ -1220,7 +1220,7 @@ class BootstrapPrefetcher:
         never matched (or whose last node left the tree) counts its plan
         device prefix. Inputs: match results, lock counts and plan peeks,
         the same on every TP rank."""
-        from decoupled_engine.srt.mem_cache.unified_cache.components.tree_component import (
+        from decoupled_engine.srt.mem_cache.unified_cache.component_type import (
             ComponentType,
         )
 
@@ -1247,7 +1247,7 @@ class BootstrapPrefetcher:
         path = self._device_path(req)
         if path is None:
             return len(getattr(req, "prefix_indices", ()))
-        from decoupled_engine.srt.mem_cache.unified_cache.components.tree_component import (
+        from decoupled_engine.srt.mem_cache.unified_cache.component_type import (
             ComponentType,
         )
 
@@ -1440,7 +1440,7 @@ class BootstrapPrefetcher:
         core = getattr(self.cache, "tree_core", None)
         if core is None or not hasattr(core, "node_by_id"):
             return sum(p.cost for p in pins), list(pins)
-        from decoupled_engine.srt.mem_cache.unified_cache.components.tree_component import (
+        from decoupled_engine.srt.mem_cache.unified_cache.component_type import (
             ComponentType,
         )
 
@@ -1455,7 +1455,13 @@ class BootstrapPrefetcher:
                 paths.append(None)
                 continue
             params = pin.lock_params
-            skip = params.skip_lock_node_ids.get(full, ()) if params is not None else ()
+            # EI-UPGRADE-TODO: v0.5.23 receipts carry component lock UUIDs, not the
+            # skipped node ids; without them nothing on the path counts as skipped.
+            skip = (
+                (getattr(params, "skip_lock_node_ids", None) or {}).get(full, ())
+                if params is not None
+                else ()
+            )
             path = []
             while node is not None and node is not root:
                 if node.id not in skip:  # the lock skipped it (evicted then)
