@@ -7912,7 +7912,7 @@ class UnifiedRadixCache(BasePrefixCache):
         ):
             return None
         from decoupled_engine.srt.mem_cache.peer_kv_namespace import peer_page_keys
-        from decoupled_engine.srt.mem_cache.utils import get_hash_str
+        from decoupled_engine.srt.mem_cache.utils import get_storage_hash_str
 
         page = self.page_size
         bigram = bool(self.tree_core.is_eagle)
@@ -7937,8 +7937,13 @@ class UnifiedRadixCache(BasePrefixCache):
             key = RadixKey(
                 tokens, req.extra_key, is_bigram=bigram, cache_salt=req.cache_salt
             )
+            # v0.5.23 seeds a chain's first page with the key's namespace, as
+            # the owner's node hashes (compute_node_hash_values) and the
+            # reader's swa_backfill_page_keys do (G3 CF4).
             chain.extend(
-                get_hash_str(key, chain[-1] if chain else None, page_size=page)
+                get_storage_hash_str(
+                    key, chain[-1] if chain else None, page_size=page
+                )
             )
         return peer_page_keys(
             chain[lo // page : hi // page], req.cache_salt, req.extra_key
@@ -8260,7 +8265,9 @@ class UnifiedRadixCache(BasePrefixCache):
             if tail is not None:
                 path = torch.cat([path, tail])
         assert len(path) >= req.prefix_len, (req.rid, len(path), req.prefix_len)
-        return path[: req.prefix_len]
+        # EI M4 Q4: keep the CPU page ids collect_full_device_indices tagged on
+        # the path (a plain slice when Q4 is off).
+        return slice_tagged(path, 0, req.prefix_len, self.page_size)
 
     def path_device_indices(self, node: NodeId) -> torch.Tensor:
         return self.tree_core.collect_full_device_indices(node, self.root_node_handle())

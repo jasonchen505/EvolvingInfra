@@ -82,6 +82,10 @@ def overlap_gate_pending_reorder_enabled() -> bool:
 def sender_waits_on_early_send_event(sender: Any) -> bool:
     """Whether the KV sender's connector waits on ``_early_send_wait_event``
     before it reads the pages (Mooncake with 6g on)."""
+    # EI-UPGRADE-TODO: v0.5.23's Mooncake transfer worker always waits on the
+    # early-send event (#41395; G5 dropped 6g), and nothing sets
+    # kv_mgr._early_send_wait any more, so this is False: with Q4 and 6d off
+    # the early send is deferred (6d path; safe, one flush later).
     return getattr(getattr(sender, "kv_mgr", None), "_early_send_wait", False) is True
 
 
@@ -153,7 +157,7 @@ class KvPageIdReader:
     blocks the CPU only until those writes ran, not until the new forward
     ends.
 
-    Rows written after the event (``cache_unfinished_req`` repointing a
+    Rows written after the event (``checkpoint_kv_cache`` repointing a
     request's rows at deduplicated tree pages during result processing) are
     detected through the pool's row-write sequence and use the legacy read on
     ``schedule_stream``, which orders after them. The pre-rewrite pages were

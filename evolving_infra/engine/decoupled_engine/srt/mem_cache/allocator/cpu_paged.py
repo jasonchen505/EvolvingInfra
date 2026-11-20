@@ -602,7 +602,9 @@ def convert_to_cpu_paged(
         raise AssertionError(
             f"Q4 needs a plain PagedTokenToKVPoolAllocator, got {type(allocator).__name__}"
         )
-    num_free = len(allocator.free_pages) + len(allocator.release_pages)
+    # v0.5.23 paged base: freed pages wait in staged_pages (release_pages is
+    # the base allocator's None placeholder).
+    num_free = len(allocator.free_pages) + allocator.num_staged_pages
     if num_free != allocator.num_pages or allocator.free_group is not None:
         raise RuntimeError(
             f"Q4 page bookkeeping must start on an idle pool: {num_free} of "

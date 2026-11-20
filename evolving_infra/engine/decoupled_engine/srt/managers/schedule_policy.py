@@ -827,12 +827,12 @@ class PrefillAdder:
                 self.memory_budget.swa_offset += sum(
                     self._swa_window_running_offset(r) for r in running_batch.reqs
                 )
-            # EI-UPGRADE-TODO: window residency also counted only
+            # Window residency also counts only
             # tree_cache.swa_admission_evictable_size() as reclaimable SWA and
-            # charged a chunked request its previous chunk until the stash ack
-            # (EI's PrefillAdder.rem_swa_tokens / _swa_budget_for_req). v0.5.23
-            # moved both into mem_cache/prefill_budget.py
-            # (SWAPrefillBudget.remaining_swa / swa_tokens); port them there.
+            # charges a chunked request its previous chunk until the stash ack
+            # (EI's PrefillAdder.rem_swa_tokens / _swa_budget_for_req), now in
+            # mem_cache/prefill_budget.py (SWAPrefillBudget.remaining_swa /
+            # swa_tokens).
 
         # A new state slot eats shared-gap bytes that `rem_total_tokens` counts
         # as free, so reserve per slot or admission over-commits. Gate on the
@@ -1908,10 +1908,9 @@ class PrefillAdder:
                         promised_host_hit,
                         req.host_loaded_length,
                     )
-                # EI-UPGRADE-TODO: overlap load-back M4 Q4 tagged the load-back
-                # prefix with CPU page ids (cpu_page_book.cat_tagged on
-                # req.prefix_indices). v0.5.23 keeps no prefix index tensor
-                # here (req.prefix_len), so Q4 needs a new hook.
+                # EI M4 Q4: the allocation reads the loaded prefix off the
+                # tree path (UnifiedRadixCache.prefix_device_indices keeps the
+                # path's CPU page tags), so no prefix tensor is tagged here.
                 req.prefix_len += req.host_loaded_length
                 if self.tree_cache.load_back_is_cache_owned():
                     req.kv.cache_protected_len = req.prefix_len

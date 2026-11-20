@@ -186,9 +186,22 @@ class SWAPrefillBudget(PrefillBudget):
             self.allocator.full_available_size() + self.tree_cache.full_evictable_size()
         )
 
+    def _swa_window(self) -> bool:
+        # EI DSv4 window SWA residency (UnifiedRadixCache uniform lifecycle).
+        return (
+            getattr(self.tree_cache, "dsv4_uniform_swa_residency", "full") == "window"
+        )
+
     @property
     def remaining_swa(self):
-        evictable = 0 if self.req_ring else self.tree_cache.swa_evictable_size()
+        if self.req_ring:
+            evictable = 0
+        elif self._swa_window():
+            # EI window residency: tree SWA not yet backed up to the host
+            # cannot be evicted, so only the admission-evictable part counts.
+            evictable = self.tree_cache.swa_admission_evictable_size()
+        else:
+            evictable = self.tree_cache.swa_evictable_size()
         return self.allocator.swa_available_size() + evictable - self.swa_offset
 
     def swa_tokens(
@@ -201,7 +214,7 @@ class SWAPrefillBudget(PrefillBudget):
     ):
         if self.req_ring:
             return self.allocator.swa_ring_cost_tokens
-        return estimate_swa_kv_tokens(
+        tokens = estimate_swa_kv_tokens(
             extend_input_len,
             max_new_tokens,
             sliding_window_size=self.tree_cache.sliding_window_size,
@@ -209,6 +222,16 @@ class SWAPrefillBudget(PrefillBudget):
             allocation_limit=chunk_limit,
             host_hit_length=swa_host_hit_length,
         )
+        if (
+            chunk_limit is not None
+            and extend_input_len > chunk_limit
+            and self._swa_window()
+        ):
+            # EI window residency (design section 10.2, F8): a chunked
+            # request keeps its previous chunk's SWA until that chunk's stash
+            # is acked, so charge it min(extend - chunk, chunk) more.
+            tokens += min(extend_input_len - chunk_limit, chunk_limit)
+        return tokens
 
     def swa_never_fits(self, extend_input_len, max_new_tokens, **kwargs):
         needed = self.swa_tokens(extend_input_len, max_new_tokens, **kwargs)

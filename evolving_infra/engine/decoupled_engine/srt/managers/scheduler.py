@@ -495,19 +495,6 @@ def _accumulate_decode_moment(
     totals[5] += g
 
 
-class _EIParallelStateView:
-    """EI compatibility: the pre-v0.5.23 ``Scheduler.ps`` (a ParallelState
-    record), read from the runtime context. Every ParallelState field name is a
-    parallel field of get_parallel(); gpu_id comes from get_device()."""
-
-    __slots__ = ()
-
-    def __getattr__(self, name: str):
-        if name == "gpu_id":
-            return get_device().gpu_id
-        return getattr(get_parallel(), name)
-
-
 _is_npu = is_npu()
 _is_hip = is_hip()
 
@@ -600,17 +587,6 @@ class Scheduler(
         self.max_new_tokens_limit = envs.SGLANG_MAX_NEW_TOKENS_LIMIT.get()
         self.enable_hisparse = get_memory().enable_hisparse
         self.attn_dp_enabled = get_parallel().attn_dp_enabled
-        # EI compatibility: v0.5.23 renamed Scheduler.enable_dp_attention to
-        # attn_dp_enabled and removed Scheduler.ps (ParallelState: read
-        # get_parallel() / get_device().gpu_id). EI modules no resolver owns
-        # (disaggregation/symmetric/*, late_d.py, late_d_need.py, jit_pull.py,
-        # queued_prefix_guard.py, bootstrap_prefetch.py, prefill_launch_thread.py,
-        # prefill_result_first.py, scheduler_components/next_batch_host_prefetch.py)
-        # still read them, several through getattr(..., "ps", None) fallbacks
-        # that would silently take rank 0 / disable a readout.
-        # EI-UPGRADE-TODO: port those readers and drop these two aliases.
-        self.enable_dp_attention = self.attn_dp_enabled
-        self.ps = _EIParallelStateView()
         self.enable_unified_memory = get_memory().enable_unified_memory
 
         # Init model configs

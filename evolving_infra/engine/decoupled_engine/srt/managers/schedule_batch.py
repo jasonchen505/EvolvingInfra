@@ -1757,6 +1757,9 @@ class Req(ReqDllmMixin):
     def kv_committed_len(self, value: int) -> None:
         self.kv.kv_committed_len = value
 
+    # A property, as in EI: every EI reader spells it `req.is_holding_kv`
+    # (no call); a method would make those tests always true.
+    @property
     def is_holding_kv(self) -> bool:
         return self.kv.holds_kv
 
