@@ -255,6 +255,17 @@ COMPONENT_REGISTRY: dict[ComponentType, type[TreeComponent]] = {
     ComponentType.SWA: SWAComponent,
 }
 
+# Trees --enable-kv-session-retention supports. FULL+SWA (DeepSeek-V4 and
+# other hybrid-SWA models): the node counters cover both components, and SWA
+# host pressure evicts in the retention order too
+# (UnifiedTreeCore._drive_retention_swa_host_eviction). Window SWA residency
+# also deletes device leaves for host headroom in that order
+# (maintain_swa_host_headroom).
+_KV_SESSION_RETENTION_COMPONENTS = (
+    frozenset({ComponentType.FULL}),
+    frozenset({ComponentType.FULL, ComponentType.SWA}),
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -445,15 +456,16 @@ class UnifiedRadixCache(BasePrefixCache):
             params, "enable_kv_session_retention", False
         )
         if self.enable_kv_session_retention and (
-            self.tree_components != (ComponentType.FULL,)
+            frozenset(self.tree_components) not in _KV_SESSION_RETENTION_COMPONENTS
             or self.enable_session_radix_cache
             or params.disable
             or params.eviction_policy.lower() != "lru"
             or select_tree_core_backend(params) != "python"
         ):
             raise ValueError(
-                "KV session retention requires Python unified FULL-only LRU cache, "
-                "without native session radix caching or disabled cache"
+                "KV session retention requires Python unified FULL-only or "
+                "FULL+SWA LRU cache, without native session radix caching or "
+                "disabled cache"
             )
         component_registry = COMPONENT_REGISTRY
         if params.component_registry_override:
@@ -3408,18 +3420,26 @@ class UnifiedRadixCache(BasePrefixCache):
         num_tokens: int,
         component_type: ComponentType = BASE_COMPONENT_TYPE,
         exclude_rid: Optional[str] = None,
+        device_drop: bool = False,
     ) -> int:
         """Evict host resources for a specific component to free host pool space.
 
         With the queued-prefix guard (disaggregation/queued_prefix_guard.py), a
         shortfall releases the guard's newest host locks and evicts again
         (never blocks a backup or fails a pull); ``exclude_rid`` is the request
-        whose pull allocation asks, so its own lock is kept."""
+        whose pull allocation asks, so its own lock is kept. ``device_drop``:
+        the window SWA residency host headroom under session retention
+        (maintain_swa_host_headroom; UnifiedTreeCore.drive_host_eviction)."""
         if self.host_memory_mode == "buffer_only":
             # The tree never holds host values in buffer mode, and staging
             # is operation-owned (freed at each ack): nothing is evictable.
             return 0
-        result = self.tree_core.drive_host_eviction(component_type, num_tokens)
+        if device_drop:
+            result = self.tree_core.drive_host_eviction(
+                component_type, num_tokens, device_drop=True
+            )
+        else:
+            result = self.tree_core.drive_host_eviction(component_type, num_tokens)
         self._apply_eviction_result(result)
         if result.duplicate_reclaimed_tokens and self.metrics_collector is not None:
             self.metrics_collector.increment_host_duplicate_reclaimed_tokens(
@@ -7370,20 +7390,27 @@ class UnifiedRadixCache(BasePrefixCache):
     def maintain_swa_host_headroom(self) -> int:
         """Keep SWA_HOST_LOW_WATERMARK of the host free:
         evict host-only leaves first, then demote and host-delete the coldest
-        backed-up device leaves (W8b). Returns the FULL host tokens freed."""
+        backed-up device leaves (W8b). Returns the FULL host tokens freed.
+
+        With session retention both victim kinds go through one retention
+        walk instead, ranked by class first: a device leaf that no live
+        session references goes before a referenced host-only leaf."""
         if not self._swa_window or self.cache_controller is None:
             return 0
         shortfall = self._swa_host_shortfall()
         if shortfall <= 0:
             return 0
-        freed = self.evict_host(shortfall)
-        shortfall = self._swa_host_shortfall()
-        if shortfall > 0:
-            result = self.tree_core.drop_backed_device_leaves(shortfall)
-            # Drains the frees and the step's cache actions (upstream results
-            # assert in __del__ that nothing was left undrained).
-            self._apply_eviction_result(result)
-            freed += result.tracker.get(BASE_COMPONENT_TYPE, 0)
+        if self.kv_sessions is not None:
+            freed = self.evict_host(shortfall, device_drop=True)
+        else:
+            freed = self.evict_host(shortfall)
+            shortfall = self._swa_host_shortfall()
+            if shortfall > 0:
+                result = self.tree_core.drop_backed_device_leaves(shortfall)
+                # Drains the frees and the step's cache actions (upstream results
+                # assert in __del__ that nothing was left undrained).
+                self._apply_eviction_result(result)
+                freed += result.tracker.get(BASE_COMPONENT_TYPE, 0)
         metrics = self.dsv4_window_metrics
         if freed and metrics is not None:
             metrics.host_maintainer_dropped_tokens.labels(**metrics.labels).inc(freed)
