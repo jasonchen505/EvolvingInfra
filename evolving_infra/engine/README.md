@@ -32,7 +32,7 @@ ones. The main changes:
 - **Pull-based and peer KV transfer** (`srt/disaggregation/`): the decode side pulls KV,
   and a prefill worker can fetch a host-resident prefix from a peer instead of recomputing it.
 - **Host KV tier** (`srt/mem_cache/`): write-through host cache with per-architecture
-  dedup and load-back, and branch-level session retention for FULL-only caches.
+  dedup and load-back, and branch-level session retention for FULL-only and FULL+SWA caches.
 - **Router integration**: prefill-state push, load reports and KV events for the router
   and its KV directory.
 - **Model support**: DeepSeek-V4 attention and memory layout, plus speculative decoding and

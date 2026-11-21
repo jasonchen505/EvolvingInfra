@@ -9,7 +9,7 @@ KV indexer, the Rust router and, in dynamic runs, the planner's live controller 
 on every node.
 
 The settings are those of the validated H200 runs (benchmarks/reproduce) with KV session
-retention off; `bench_config` returns them as one JSON-able dict that `node.py` reads and the run
+retention on; `bench_config` returns them as one JSON-able dict that `node.py` reads and the run
 directory keeps.
 """
 from __future__ import annotations
@@ -49,10 +49,12 @@ ENGINE = dict(
     late_d=dict(mode="choose", lead_mode="need", allocation_trigger="first_chunk", control_port_base=21776),
 )
 
-# Engine environment. Kept names: SGLANG_* (see docs/architecture.md). Session-retention words
-# (SGLANG_KV_SESSION_RETENTION_*, host-evict fraction) are left out: retention is off and the engine
-# ignores them; the session ADMIT tag belongs to late D and stays.
+# Engine environment. Kept names: SGLANG_* (see docs/architecture.md). KV session retention comes on
+# with the symmetric preset; its order and soft pin keep the engine's defaults.
 ENGINE_ENV = {
+    # Each retention host eviction frees at least 1 % of the asking host pool: the walk heaps every
+    # host candidate per call, and one-page calls slow the scheduler as the host tree grows.
+    "SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION": "0.01",
     # A D declares a P lost after 6 failed bootstrap heartbeats 5 s apart instead of 2 (a worker exit
     # can freeze a Modal node for ~16 s).
     "SGLANG_DISAGGREGATION_HEARTBEAT_INTERVAL": "5", "SGLANG_DISAGGREGATION_HEARTBEAT_MAX_FAILURE": "6",
@@ -223,8 +225,6 @@ def router_command(cfg: dict, ips: list, rundir: str, query_url: str) -> list[st
     cmd = [ROUTER_BIN, "--host", "0.0.0.0", "--port", str(ROUTER_PORT), "--model-id", SERVED,
            "--tokenizer-path", f"{MODEL}/tokenizer.json", *ROUTER_ARGS,
            "--kv-indexer-url", query_url, "--placement-trace", f"{rundir}/router-placement.jsonl"]
-    # DSV4's FULL+SWA cache tree has no KV session retention; the router's paper preset would turn it on.
-    cmd += ["--symmetric-pd-no-kv-session-retention"]
     if c := cfg.get("controller"):
         cmd += ["--symmetric-pd-external-role-control", "--symmetric-pd-role-drain-timeout-secs", str(c["role_drain_timeout_s"])]
     for w in ws:
@@ -267,11 +267,11 @@ def trace_server_command(cfg: dict) -> list[str]:
 
 
 def replay_env(cfg: dict, ips: list) -> dict:
-    """EVOLVING_INFRA_REPLAY for benchmarks/replay/run_trie.py (process i uses frontend i). No session END:
-    retention is off and the engines would refuse it."""
+    """EVOLVING_INFRA_REPLAY for benchmarks/replay/run_trie.py (process i uses frontend i). The replay
+    ends every branch with a session END."""
     return dict(router_url=ROUTER_URL, tokenizer_urls=frontend_urls(cfg, ips), config_id=CONFIG_ID,
                 model_name=SERVED, model_path=MODEL, incremental_streaming_output=True, cache_salt=None,
-                timeout_s=3600, retention_enabled=False)
+                timeout_s=3600, retention_enabled=True)
 
 
 def trie_command(cfg: dict, shard: str, concurrency: int, outdir: str, i: int) -> list[str]:

@@ -564,7 +564,7 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pub symmetric_pd_kv_session_retention: bool,
     /// Keep KV session retention off under `--symmetric-pd-preset paper`, for engines whose
-    /// model does not support it (a cache tree that is not FULL-only, e.g. DeepSeek-V4).
+    /// model runs without it (a Mamba state, or sliding-window layers outside DeepSeek-V4).
     #[arg(long, conflicts_with = "symmetric_pd_kv_session_retention")]
     pub symmetric_pd_no_kv_session_retention: bool,
 

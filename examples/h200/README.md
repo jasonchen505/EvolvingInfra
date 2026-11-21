@@ -7,7 +7,7 @@ host KV tier with DSV4 host dedup. Config: [`dsv4-flash.yaml`](dsv4-flash.yaml).
 |---|---|
 | Workers | 2 × TP4 per node; one node is 1P1D |
 | Block size | 256 tokens |
-| KV session retention | off: DSV4's cache tree is FULL+SWA (`retention: false`) |
+| KV session retention | on (DSV4's cache tree is FULL+SWA) |
 | Workload | Claude Code traces for this tokenizer, `claude-code/cc062126-dsv4-flash.jsonl` |
 
 ## Run

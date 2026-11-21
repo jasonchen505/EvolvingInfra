@@ -7,7 +7,6 @@ served_model_name: deepseek-v4-flash
 page_size: 256
 context_length: 1048576
 gpus_per_worker: 4
-retention: false               # KV session retention needs a FULL-only cache tree; DSV4's is FULL+SWA
 engine_args:
   - --trust-remote-code
   - --moe-runner-backend=flashinfer_mxfp4
@@ -28,6 +27,9 @@ engine_env:
   # Register the host KV tier for RDMA in 16 GB pieces: one 71 GB registration per worker fails on
   # Modal H200 nodes (peer_kv host registration rc=-202); the paper's H200 runs used 16.
   SGLANG_HICACHE_HOST_REGISTER_CHUNK_GB: 16
+  # Each KV session retention host eviction frees at least 1 % of the host pool: the walk ranks every
+  # host copy per call, and one-page calls slow the scheduler as the host tier fills.
+  SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION: 0.01
 planner:
   prefill_shape_prior: dsv4-flash-h200-tp4
 

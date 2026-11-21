@@ -63,8 +63,8 @@ writes its launch script.
   concurrent continuation or a fork from an earlier turn of the same conversation.
 - The gateway keeps its identities in memory. A restarted gateway sends no END for the branches
   it knew, and the router keeps their sessions until it restarts too.
-- KV session retention needs a FULL-only cache tree: DeepSeek-V4-Flash (FULL+SWA) runs without it,
-  and the gateway then sends no session END.
+- With `retention: false` in the config the router runs without KV session retention, and the
+  gateway then sends no session END.
 - The gateway sends chat completions on the plain path. A stack started with `--planner` (KV
   retention on) refuses plain requests, and the planner learns only from the prepared path, so
   harnesses need a stack without `--planner`.

@@ -34,7 +34,7 @@ them in one `Symmetric features:` line at startup.
 | Peer KV pulls | `--enable-peer-kv-servicer`, `--hicache-storage-backend dynamic` with the peer KV backend | On when `--disaggregation-ib-device` is set. The servicer listens on `--peer-kv-servicer-port` (default 18100) and the next ports, one per GPU; give each engine on a node its own range |
 | Late decode choice | `--disaggregation-late-d choose`, `--disaggregation-late-d-lead-mode need`, `--disaggregation-late-d-allocation-trigger first_chunk` | The router-link port is a free port, reported in `/server_info` |
 | Prefill work snapshot | `--enable-prefill-work-snapshot` | Read by the router's cost function |
-| KV session retention | `--enable-kv-session-retention` | On models with a FULL-only cache tree, such as GLM-5.2 and Kimi-K2.6. Without it the engine ignores the router's session tags |
+| KV session retention | `--enable-kv-session-retention` | On models with a FULL-only cache tree and on DeepSeek-V4: GLM-5.2, Kimi-K2.6, DeepSeek-V4-Flash. Without it the engine ignores the router's session tags |
 
 ### Other flags
 
@@ -91,7 +91,7 @@ that is given wins.
 | Prefill placement by predicted time to first token, with peer pulls | `--symmetric-pd-p-select cost-function`, `--symmetric-pd-pull-hint`, `--symmetric-pd-pull-from-any-holder`, `--kv-pull-hint-min-incremental-tokens 512`, `--prefill-poll-ms 100`. On when `--kv-indexer-url` is set and `--kv-worker-map` names the servicers; otherwise `cache-first` |
 | Prefill completion forecast and global queue (with the cost function) | `--prefill-wait forecast`, `--global-queue`, `--global-queue-room forecast`, `--forecast-next-pass-lag`, `--move-margin 0`, `--max-state-age-ms 5000`, and the error table built into the router. The paper's runs used `--prefill-wait tokens --global-queue=false`; the GLM-5.2 and DeepSeek-V4-Flash configs pin these |
 | Late decode choice | `--pd-late-decode choose --pd-late-decode-rule fit_req --pd-late-decode-candidates all --pd-late-decode-local off --pd-late-decode-fit-native --pd-native-decode-state` |
-| KV session retention | `--symmetric-pd-kv-session-retention`; `--symmetric-pd-no-kv-session-retention` keeps it off for a model whose engine does not support it (DeepSeek-V4) |
+| KV session retention | `--symmetric-pd-kv-session-retention`; `--symmetric-pd-no-kv-session-retention` keeps it off for a model whose engine runs without it (a Mamba state, or sliding-window layers outside DeepSeek-V4) |
 | Placement basics | `--symmetric-pd-force-split`, `--symmetric-pd-d-select round-robin`, `--symmetric-pd-load-poll-ms 100`, `--symmetric-pd-import-cache-policy retain` (a D may become a P later, so imported KV follows the host write policy), `--kv-indexer-timeout-ms 200` |
 
 ### Tuning
@@ -198,7 +198,7 @@ holds what it cannot detect.
 | `context_length` | maximum prompt length | 1048576 for the frontend |
 | `gpus_per_worker` | TP size of one worker | all GPUs of a host; half of them on a single host |
 | `prefill_workers` | workers that start as prefill | half of the workers |
-| `retention` | KV session retention in the router; `false` for a model whose cache tree is not FULL-only | `true` |
+| `retention` | KV session retention in the router; `false` for a model whose engine runs without it (a Mamba state, or sliding-window layers outside DeepSeek-V4) | `true` |
 | `tokenizer` | the `tokenizers` file the router reads | `<model>/tokenizer.json` |
 | `engine_env` | environment variables of every engine | none |
 | `frontend` | settings added to the tokenizer frontend's config: `image_config` for image input, body and staging limits | none |

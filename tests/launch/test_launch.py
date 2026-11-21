@@ -114,15 +114,14 @@ def test_one_node_config_replaces_flags_of_its_base(stack):
     assert [(w.gpus, w.role) for w in s.workers] == [(2, "prefill"), (2, "decode")]
 
 
-def test_h200_config_has_two_tp4_workers_per_node_without_eagle_or_retention(stack, monkeypatch):
+def test_h200_config_has_two_tp4_workers_per_node_without_eagle(stack, monkeypatch):
     monkeypatch.setattr(hardware, "gpu_count", lambda: 8)
     s = stack(["--config", "examples/h200/dsv4-flash.yaml"], hosts=("a", "b"))
     assert [(w.ip, w.gpus, w.base_gpu) for w in s.workers] == [
         ("10.0.0.1", 4, 0), ("10.0.0.1", 4, 4), ("10.0.0.2", 4, 0), ("10.0.0.2", 4, 4)]
     assert len({(w.ip, p) for w in s.workers for p in w.ports()}) == sum(len(w.ports()) for w in s.workers)
     assert not s.eagle, "DSPARK is not EAGLE: the KV directory hashes plain token pages"
-    assert not s.retention and s.cfg["page_size"] == 256
-    assert stack(["--config", "examples/gb300/glm52.yaml"]).retention
+    assert s.retention and s.cfg["page_size"] == 256, "DSV4's FULL+SWA cache tree takes retention"
 
 
 def test_kimi_config_passes_its_tokenizer_environment_and_image_layout(stack, tmp_path):

@@ -46,8 +46,8 @@ class Stack:
         self.head = self.ips[0]
         self.planner = cfg.get("planner")  # None: off; a dict of planner arguments: on
         self.eagle = "--speculative-algorithm=EAGLE" in " ".join(cfg.get("engine_args", [])).replace("algorithm ", "algorithm=")
-        # KV session retention needs a FULL-only cache tree; the engine preset decides the same way per
-        # model. `retention: false` in the config turns it off in the router for the other models.
+        # KV session retention needs a FULL-only or FULL+SWA cache tree; the engine preset decides the
+        # same way per model. `retention: false` in the config turns it off in the router for the others.
         self.retention = cfg.get("retention", True)
         # The agent gateway for coding-agent harnesses runs only with a `gateway` section; its `host`
         # is the bind address (default 127.0.0.1: this host only).
