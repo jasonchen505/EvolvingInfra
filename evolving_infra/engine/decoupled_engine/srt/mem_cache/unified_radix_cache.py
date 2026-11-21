@@ -3434,12 +3434,15 @@ class UnifiedRadixCache(BasePrefixCache):
             # The tree never holds host values in buffer mode, and staging
             # is operation-owned (freed at each ack): nothing is evictable.
             return 0
+        target = max(num_tokens, self._retention_host_evict_floor(component_type))
         if device_drop:
+            # Session retention only, which runs on the Python tree core: the
+            # tree core interface has no such parameter.
             result = self.tree_core.drive_host_eviction(
-                component_type, num_tokens, device_drop=True
+                component_type, target, device_drop=True
             )
         else:
-            result = self.tree_core.drive_host_eviction(component_type, num_tokens)
+            result = self.tree_core.drive_host_eviction(component_type, target)
         self._apply_eviction_result(result)
         if result.duplicate_reclaimed_tokens and self.metrics_collector is not None:
             self.metrics_collector.increment_host_duplicate_reclaimed_tokens(
@@ -7370,6 +7373,22 @@ class UnifiedRadixCache(BasePrefixCache):
             self.dec_lock_ref(
                 lag_lock.node_id, lag_lock.params, skip_swa=lag_lock.swa_released
             )
+
+    def _retention_host_evict_floor(self, component_type: ComponentType) -> int:
+        """SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION of the host pool that
+        ``component_type`` frees (KV anchor or SWA), page aligned; 0 without
+        session retention or a host pool group. Pool sizes are the same on
+        every TP rank, so the walk stays in lockstep."""
+        group = self.host_pool_group
+        if self.kv_sessions is None or group is None:
+            return 0
+        frac = envs.SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION.get()
+        if frac <= 0:
+            return 0
+        name = PoolName.SWA if component_type == ComponentType.SWA else None
+        if name is not None and name not in group.entry_map:
+            return 0
+        return ceil_align(int(group.get_pool(name).size * frac), self.page_size)
 
     def _swa_host_shortfall(self) -> int:
         """Host tokens missing to the SWA_HOST_LOW_WATERMARK headroom over the
