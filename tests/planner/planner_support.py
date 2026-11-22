@@ -53,12 +53,14 @@ def router_samples(first, last, start=100., seconds=600, step=3, wall=None):
     return out
 
 
-def restore_record(at, tokens, node=0):
+def restore_record(at, tokens, node=0, tp_ranks=None):
     """A restore-observations record as observe.Telemetry writes it: P node `node` scraped from `at` to `at` + 0.01 s
-    with its kv-pool restore counter at `tokens` (None: not exported yet, as before the first restore)."""
+    with its kv-pool restore counter at `tokens` (None: not exported yet, as before the first restore).
+    `tp_ranks`: the engine's form, one series for each of these TP ranks at `tokens`; without it, one series."""
     metrics = '# HELP sglang:hicache_backup_bytes_total Bytes.\n'
     if tokens is not None:
-        metrics += f'sglang:load_back_tokens_total{{model_name="m",pool="kv"}} {tokens}\n'
+        for labels in [f',tp_rank="{rank}"' for rank in tp_ranks] if tp_ranks is not None else ['']:
+            metrics += f'sglang:load_back_tokens_total{{model_name="m",pool="kv"{labels}}} {tokens}\n'
     return dict(at=at+.01, nodes=[dict(node=node, role='prefill', at=at, errors={}, metrics=metrics)])
 
 

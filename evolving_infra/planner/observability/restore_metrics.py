@@ -3,7 +3,8 @@
 """Restored-token counters of the P workers: scraped by the controller, read back by the fit.
 
 Every P engine exports ``sglang:load_back_tokens_total{pool="kv"}``, the tokens it loaded back from host memory into
-GPU memory. Every TP rank increments it, so values are divided by the TP size (``replicas``). ``Telemetry`` writes
+GPU memory, one series per TP rank (label ``tp_rank``), each with the same count: the fit reads rank 0's
+(``kv_restore_counts``). ``Telemetry`` writes
 one record per worker scrape with its own collection interval. The fit reads the records back as one value per
 scrape (``read_restore_counters``, ``counter_bracket``) and as conservative bounds that include the whole HTTP
 collection time (``include_scrape_collection_time``).
@@ -15,6 +16,7 @@ import gzip
 import json
 import math
 from pathlib import Path
+import re
 import threading
 import time
 
@@ -23,6 +25,7 @@ from evolving_infra.planner.utils import open_url
 
 BACKUP_HELP = "# HELP sglang:hicache_backup_bytes_total "
 RESTORE_COUNTER = "sglang:load_back_tokens_total{"
+TP_RANK_LABEL = re.compile(r'[{,]tp_rank="(\d+)"')
 
 
 class Telemetry(threading.Thread):
@@ -69,11 +72,27 @@ def counter_replicas(capacities):
     return sizes.pop()
 
 
-def restore_counter_rows(path, replicas):
-    """(scrape, record, kv-pool restore counter values / replicas) per usable P scrape of a
-    restore-observations .jsonl.gz file.
+def kv_restore_counts(metrics, replicas):
+    """The kv-pool restore counts in one scrape's metrics: one value, or none before the first restore.
 
-    Every TP rank exports the counter, so `replicas` must be audited, never inferred from values.
+    One series per TP rank gives rank 0's value; a repeated rank or a rank outside the TP size is refused.
+    Series without the label come from ranks that share them and hold the count times the TP size: each is
+    divided by `replicas`, and the callers refuse more than one.
+    """
+    series = [s for s in metrics.splitlines() if s.startswith(RESTORE_COUNTER) and 'pool="kv"' in s]
+    ranks = [TP_RANK_LABEL.search(s) for s in series]
+    if not any(ranks):
+        return [float(s.split()[-1])/replicas for s in series]
+    ranks = [int(m.group(1)) if m else -1 for m in ranks]
+    if len(set(ranks)) != len(ranks) or not all(0 <= r < replicas for r in ranks):
+        raise ValueError("Ambiguous restore counter series")
+    return [float(s.split()[-1]) for s, r in zip(series, ranks) if r == 0]
+
+
+def restore_counter_rows(path, replicas):
+    """(scrape, record, kv-pool restore counts) per usable P scrape of a restore-observations .jsonl.gz file.
+
+    `replicas` is the TP size; it must be audited, never inferred from values.
     Each caller reads the scrape's node and times and applies its own checks, in its own order.
     """
     if not isinstance(replicas, int) or replicas < 1:
@@ -89,9 +108,7 @@ def restore_counter_rows(path, replicas):
                 # Verify this collector through its already-active backup series.
                 if BACKUP_HELP not in metrics:
                     continue
-                values = [float(s.split()[-1])/replicas for s in metrics.splitlines()
-                          if s.startswith(RESTORE_COUNTER) and 'pool="kv"' in s]
-                yield node, record, values
+                yield node, record, kv_restore_counts(metrics, replicas)
 
 
 def read_restore_counters(path, replicas):

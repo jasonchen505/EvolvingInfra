@@ -32,6 +32,10 @@ class LiveWindowsTests(unittest.TestCase):
         self.assertEqual(len(windows),4)
         self.assertEqual(coverage['node0']['open_steps'],1)
         self.assertTrue(all(w['restore_lo']<=w['features'][3]<=w['restore_hi'] for w in windows))
+    def test_one_counter_series_per_tp_rank_gives_the_same_windows(self):
+        expected=self.run_windows()
+        write_telemetry(self.telemetry,[restore_record(t,t+4,tp_ranks=(3,1,0,2)) for t in range(-4,313,2)])
+        self.assertEqual(self.run_windows(),expected)
     def test_post_deadline_closure_cannot_complete_last_window(self):
         windows,_=self.run_windows()
         self.assertNotIn(240,[w['start'] for w in windows])
