@@ -1751,6 +1751,7 @@ class SchedulerSymmetricMixin:
         if reason == COMPUTE_ABORT:
             self._symmetric_stop_computed(req, reason)
             if req.is_holding_kv:
+                self.export_table.free_swa_branch_window(req)
                 release_kv_cache(req, self.tree_cache, checkpoint=False)
             return
         if reason == LATE_READER_GONE:
@@ -1803,8 +1804,10 @@ class SchedulerSymmetricMixin:
             # Its next chunk inserts are the standard ones: the recorded chunk
             # ends no longer describe how its prompt enters the tree.
             req.release_insert_chunk_ends = None
-            # Its next chunk insert caches the window kept at its branching point.
-            self.export_table.reopen_swa_branch_window(req)
+            # A plain request has no SWA below swa_evicted_seqlen: a window the
+            # trim kept there is freed, and no chunk insert caches SWA at the
+            # branching point.
+            self.export_table.free_swa_branch_window(req)
             return
         if reason != RELEASED:
             logger.warning(
@@ -1817,6 +1820,7 @@ class SchedulerSymmetricMixin:
             # Inserts the (finished) request's prefix into the radix tree and
             # frees the rest, exactly like a Local finish.
             if isinstance(req.finished_reason, FINISH_ABORT):
+                self.export_table.free_swa_branch_window(req)
                 release_kv_cache(req, self.tree_cache, checkpoint=False)
             else:
                 if (
@@ -1825,8 +1829,9 @@ class SchedulerSymmetricMixin:
                 ):
                     # A standard prefill's chunk insert caches the SWA window at
                     # the branching point; the finish insert stops there instead.
-                    self.export_table.reopen_swa_branch_window(req)
-                    maybe_cache_unfinished_req(req, self.tree_cache)
+                    self.export_table.insert_swa_branch_window(
+                        req, lambda: maybe_cache_unfinished_req(req, self.tree_cache)
+                    )
                 release_kv_cache(req, self.tree_cache, checkpoint=True)
 
     def _symmetric_import_fallback(self: Scheduler, req: Req, reason: str) -> None:
