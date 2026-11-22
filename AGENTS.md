@@ -97,6 +97,7 @@ Skills live in `skills/`. To use one, read its `SKILL.md` and follow it.
 | [`add-harness`](skills/add-harness/SKILL.md) | `examples/agents/` | add a launch script for another agent harness and check it with one prompt and one tool call |
 | [`run-benchmark`](skills/run-benchmark/SKILL.md) | `examples/`, `benchmarks/` | run the paper's replay benchmark, score it and compare it with the reference |
 | [`diagnose-run`](skills/diagnose-run/SKILL.md) | repository; writes the fix once the cause is named | find why a run did not start, failed a request, or scored below the reference |
+| [`optimize-speculative-decoding`](skills/optimize-speculative-decoding/SKILL.md) | `evolving_infra/engine/`, `examples/` | find lossless speedups of speculative decoding for one model, draft method and GPU, with paired measurements |
 
 Each skill follows [`skills/SKILL_TEMPLATE.md`](skills/SKILL_TEMPLATE.md): its scope (what it
 reads, writes, never changes, and does outside the repository), its inputs, numbered steps that
