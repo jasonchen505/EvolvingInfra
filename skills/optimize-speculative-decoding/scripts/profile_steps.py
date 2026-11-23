@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: Copyright (c) 2026 The evolving-infra Authors
 # SPDX-License-Identifier: MIT
-"""GPU time per decode step, by kernel class, from one torch profiler trace of one GPU.
+"""GPU time per decode step, by kernel class, from torch profiler traces of one GPU.
 
-    python profile_steps.py TRACE.json[.gz] [--classes CLASSES.json] [--drop-factor 1.5] [--top 15]
-    python profile_steps.py TRACE.json[.gz] --steps N      # when the trace has no CUDA graph launches
+    python profile_steps.py TRACE.json[.gz] [...] [--classes CLASSES.json] [--drop-factor 2.5] [--top 15]
+    python profile_steps.py TRACE.json[.gz] [...] --steps N  # when the traces have no CUDA graph launches
 
-The engine writes the trace with POST /start_profile {"output_dir": ..., "num_steps": N,
-"activities": ["CPU", "GPU"]}, one file per GPU. Steps are cut at the launches of the CUDA graph
-with the most kernels, the target model's forward; a step runs until the next such launch, so it
-holds the drafting and everything else between two target forwards. Steps longer than
---drop-factor times the median are left out: they hold a prefill, or the profiler's own start and
-stop. Without CUDA graph launches, --steps N divides the whole trace into N steps' worth of time.
+The engine writes a trace with POST /start_profile {"output_dir": ..., "num_steps": N,
+"activities": ["CPU", "GPU"]}, one file per GPU. During a run the engine's batch varies, so profile
+windows spread through the run (for example a quarter, half and three quarters of the way) and pass
+one GPU's traces of all of them: their steps are pooled. Steps are cut at the start of the target model's
+exact pass: with --anchor-kernel REGEX at every kernel whose name matches (name the first kernel of
+the exact pass when a step holds several forwards, such as a low-precision pre-check); otherwise at
+the launches of the CUDA graph with the most kernels. A step runs until the next cut, so it holds the
+drafting and everything else between two exact passes; a kernel that crosses a cut is split between
+the two steps. Steps longer than --drop-factor times the trace's median are left out: they hold a
+prefill, or the profiler's own start and stop; a decode step of the run's largest batch stays below
+it. --steps N instead divides each trace into N steps' worth of time.
 
 Per step: wall time, GPU busy time (the union of kernel, copy and memset intervals) and the busy
-time of each kernel class. A kernel belongs to the first class whose regular expression matches
+time of each kernel class, averaged over the pooled steps (T_prof is the mean busy time). A kernel belongs to the first class whose regular expression matches
 its name; --classes takes a JSON list of [class, regex] pairs to replace the defaults below. Check
 the top kernels list against the classes: kernel names differ between models and GPUs.
 """
 import argparse
+import bisect
 import collections
 import gzip
 import json
@@ -83,26 +89,30 @@ def classify(name, classes):
     return "other"
 
 
+def anchor_cuts(events, pattern):
+    return sorted(e["ts"] for e in events if e.get("cat") == "kernel" and pattern.search(e.get("name", "")))
+
+
 def steps(events, classes, cuts, drop_factor):
     gpu = sorted((e for e in events if e.get("cat") in GPU and "dur" in e), key=lambda e: e["ts"])
+    starts = [e["ts"] for e in gpu]
+    longest = max((e["dur"] for e in gpu), default=0)
     rows = []
-    j = 0
     for start, stop in zip(cuts, cuts[1:]):
-        while j < len(gpu) and gpu[j]["ts"] < start:
-            j += 1
-        k = j
         inside = []
-        while k < len(gpu) and gpu[k]["ts"] < stop:
-            inside.append(gpu[k])
-            k += 1
+        for e in gpu[bisect.bisect_left(starts, start - longest):bisect.bisect_left(starts, stop)]:
+            lo, hi = max(e["ts"], start), min(e["ts"] + e["dur"], stop)
+            if hi > lo:
+                inside.append((e, lo, hi))
         by_class = collections.defaultdict(list)
         names = collections.Counter()
-        for e in inside:
-            interval = (e["ts"], min(e["ts"] + e["dur"], stop))
-            by_class[classify(e["name"], classes)].append(interval)
-            names[e["name"]] += interval[1] - interval[0]
-        rows.append({"wall": stop - start, "busy": union([i for v in by_class.values() for i in v]),
-                     "classes": {c: union(v) for c, v in by_class.items()}, "names": names})
+        for e, lo, hi in inside:
+            by_class[classify(e["name"], classes)].append((lo, hi))
+            names[e["name"]] += hi - lo
+        busy = union([i for v in by_class.values() for i in v])
+        per_class = {c: union(v) for c, v in by_class.items()}
+        rows.append({"wall": stop - start, "busy": busy, "classes": per_class,
+                     "overlap": sum(per_class.values()) - busy, "names": names})
     if not rows:
         return [], 0
     median = statistics.median(r["wall"] for r in rows)
@@ -110,8 +120,8 @@ def steps(events, classes, cuts, drop_factor):
     return kept, len(rows) - len(kept)
 
 
-def summarize(events, classes, drop_factor=1.5, n_steps=None):
-    cuts = boundaries(events)
+def summarize(events, classes, drop_factor=2.5, n_steps=None, anchor=None):
+    cuts = anchor_cuts(events, anchor) if anchor is not None else ([] if n_steps else boundaries(events))
     if len(cuts) >= 3:
         rows, dropped = steps(events, classes, cuts, drop_factor)
         count = len(rows)
@@ -124,6 +134,7 @@ def summarize(events, classes, drop_factor=1.5, n_steps=None):
         row = whole[0]
         rows = [{"wall": row["wall"] / n_steps, "busy": row["busy"] / n_steps,
                  "classes": {c: v / n_steps for c, v in row["classes"].items()},
+                 "overlap": row["overlap"] / n_steps,
                  "names": collections.Counter({k: v / n_steps for k, v in row["names"].items()})}]
         dropped, count = 0, n_steps
     names = collections.Counter()
@@ -133,20 +144,43 @@ def summarize(events, classes, drop_factor=1.5, n_steps=None):
     return {
         "steps": count, "dropped": dropped,
         "wall_us_median": statistics.median(r["wall"] for r in rows),
+        "wall_us_mean": statistics.mean(r["wall"] for r in rows),
         "busy_us_median": statistics.median(r["busy"] for r in rows),
         "busy_us_mean": statistics.mean(r["busy"] for r in rows),
         "classes_us_mean": {c: statistics.mean(r["classes"].get(c, 0.0) for r in rows) for c in labels},
+        "overlap_us_mean": statistics.mean(r.get("overlap", 0.0) for r in rows),
         "top": [(n, t / len(rows)) for n, t in names.most_common()],
     }
+
+
+def pool(summaries):
+    """The means over the steps of several traces (windows of one run), each trace weighted by its steps."""
+    steps = sum(s["steps"] for s in summaries)
+
+    def mean(key):
+        return sum(s[key] * s["steps"] for s in summaries) / steps
+
+    labels = sorted({c for s in summaries for c in s["classes_us_mean"]})
+    top = collections.Counter()
+    for s in summaries:
+        for name, us in s["top"]:
+            top[name] += us * s["steps"]
+    return {"steps": steps, "dropped": sum(s["dropped"] for s in summaries), "traces": len(summaries),
+            "wall_us_mean": mean("wall_us_mean"), "busy_us_mean": mean("busy_us_mean"),
+            "classes_us_mean": {c: sum(s["classes_us_mean"].get(c, 0.0) * s["steps"] for s in summaries) / steps
+                                for c in labels},
+            "overlap_us_mean": mean("overlap_us_mean"),
+            "top": [(n, t / steps) for n, t in top.most_common()]}
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                      formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    parser.add_argument("trace")
+    parser.add_argument("traces", nargs="+")
     parser.add_argument("--classes", default=None)
-    parser.add_argument("--drop-factor", type=float, default=1.5)
+    parser.add_argument("--drop-factor", type=float, default=2.5)
     parser.add_argument("--steps", type=int, default=None)
+    parser.add_argument("--anchor-kernel", default=None, help="regex of the first kernel of the exact pass")
     parser.add_argument("--top", type=int, default=15)
     parser.add_argument("--json", default=None)
     args = parser.parse_args()
@@ -155,12 +189,14 @@ def main() -> int:
         with open(args.classes) as f:
             table = json.load(f)
     classes = [(label, re.compile(pattern)) for label, pattern in table]
-    s = summarize(load(args.trace), classes, args.drop_factor, args.steps)
+    anchor = re.compile(args.anchor_kernel) if args.anchor_kernel else None
+    s = pool([summarize(load(trace), classes, args.drop_factor, args.steps, anchor) for trace in args.traces])
     busy = s["busy_us_mean"]
-    print(f"{s['steps']} steps ({s['dropped']} left out), wall {s['wall_us_median'] / 1e3:.3f} ms median, "
-          f"GPU busy {s['busy_us_median'] / 1e3:.3f} ms median, idle {100 * (1 - s['busy_us_median'] / s['wall_us_median']):.1f} %")
+    print(f"{s['steps']} steps from {s['traces']} traces ({s['dropped']} left out), wall {s['wall_us_mean'] / 1e3:.3f} ms "
+          f"mean, GPU busy {busy / 1e3:.3f} ms mean, idle {100 * (1 - busy / s['wall_us_mean']):.1f} %")
     for label, us in sorted(s["classes_us_mean"].items(), key=lambda kv: -kv[1]):
         print(f"  {label:24s} {us / 1e3:8.3f} ms  {100 * us / busy:5.1f} % of busy")
+    print(f"  classes overlap by {s['overlap_us_mean'] / 1e3:.3f} ms per step (kernels on concurrent streams)")
     print("top kernels (ms per step, class):")
     for name, us in s["top"][: args.top]:
         print(f"  {us / 1e3:8.3f}  {classify(name, classes):22s} {name[:110]}")

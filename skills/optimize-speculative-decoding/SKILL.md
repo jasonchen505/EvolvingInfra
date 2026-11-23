@@ -1,250 +1,213 @@
 ---
 name: optimize-speculative-decoding
-description: Find lossless speedups of speculative decoding for one model, draft method and GPU with the SpecPilot cost model, and prove each with paired measurements. Use when asked to make decoding faster with speculative decoding, choose draft settings, or decide whether an engine change speeds up decode steps. Not for comparing a whole run with the paper's reference; use `run-benchmark`.
+description: Run SpecPilot's loop (arXiv 2611.02501) on one speculative-decoding deployment - compute the ceiling, explore directions in parallel, promote changes on paired runs, check that every change stays lossless, and seal each round on unseen requests. Use when asked to make speculative decoding faster for a target, drafter and GPU, or to decide whether a change speeds it up without changing outputs. Not for running Evolving Infra's replay benchmark; use `run-benchmark`.
 ---
 
 # Optimize speculative decoding
 
-Find changes that make speculative decoding faster for one model, draft method and GPU without
-changing what the model outputs, each backed by paired measurements. The model and its draft
-model must already run on `decoupled-engine`.
+This skill makes one deployment's speculative decoding faster without changing what the target model
+outputs. A deployment is a serving regime, a drafter, a target model and a GPU platform; the target
+and its drafter run on `decoupled-engine`. The steps below are SpecPilot's workflow
+([arXiv 2611.02501](https://arxiv.org/abs/2611.02501)) and are followed in order. Three references
+hold the procedures the steps call: [references/cost-model.md](references/cost-model.md) computes the
+ceiling, [references/lossless.md](references/lossless.md) holds the lossless checks with their pass
+criteria, and [references/replay.md](references/replay.md) the rules every run follows.
 
 ## Scope
 
-- **Reads**: `evolving_infra/engine/`: the speculative decoding workers, kernels and server
-  arguments; `examples/`: the starting configurations; `skills/optimize-speculative-decoding/references/`:
-  the cost model.
-- **Writes**: `evolving_infra/engine/`: changes, each behind a flag or environment variable that
-  is off by default; `examples/`: a configuration with the promoted settings. Measurements go
-  to a work directory outside the repository.
-- **Never changes**: the engine's defaults and the tokens it commits: with every new flag off
-  the engine behaves as before, and with it on the outputs stay lossless under the decoding
-  rule (Inputs). `benchmarks/`: other results are compared with its
-  replay settings.
-- **Outside the repository**: GPU jobs. A measured run holds the GPUs of one engine for its
-  start and a few minutes of decoding; a paired comparison takes two nodes with at least two
-  runs of each arm on each. Agree on the GPU budget with the owner before the first job.
+- **Reads**: `evolving_infra/engine/`: the speculative workers, kernels and server arguments;
+  `skills/optimize-speculative-decoding/references/`: the procedures.
+- **Writes**: `evolving_infra/engine/`: patches behind options whose defaults reproduce stock;
+  `tests/engine/`: their tests; `docs/`: the options they add. Notes, measurements and memory entries
+  go to a work directory outside the repository.
+- **Never changes**: `skills/optimize-speculative-decoding/scripts/` and the frozen configuration of
+  step 2 during a study: they are the controller, which the optimizing agents call and never modify. A
+  defect found in one goes to the owner, who fixes it in its own commit with a test; every
+  measurement it touched is redone.
+- **Outside the repository**: GPU jobs and sub-agents, agreed with the owner before the first job.
 
 ## Inputs
 
-- The starting configuration: model, draft method and its settings, as engine arguments or a
-  config under `examples/`. Ask the owner when missing; do not guess.
-- The GPU type and the number of GPUs per engine, or the owner's rule for choosing it per batch
-  size. A rule needs a definition of fitting: for example, the token capacity the engine reports
-  at start against a high percentile of the summed context (prompt and output) of B requests drawn
-  from the exploration set.
-- The batch sizes to optimize: how many requests one engine decodes at once in the target use.
-- A request set from the traffic to be served: one JSON object per line with `id`, the prompt
-  as `input_ids` or as `text` (with `image_data` for images), and `max_new_tokens`. How many
-  draft tokens are accepted depends on the content, so the prompts must be real traffic.
-- The decoding rule, and what lossless means under it. Under greedy decoding a committed token
-  must be the target's most likely token. Under sampling the owner chooses:
-  - **the same draws**: every committed token is the token the target draws itself with the same
-    key (a seed per request and the position). The engine without speculation must draw with that
-    key, and so must the verify step of the draft method. `fixed_batch_client.py --keyed-seed`
-    checks the engine before every run; step 7 checks the outputs.
-  - **the same distribution**: committed tokens follow the target's distribution (rejection
-    sampling). Step 7's position-by-position check does not apply; agree on the check with the
-    owner.
-- The GPU budget and the time limit. Keep enough of both for step 7.
-- Never ask for a token or password; the person logs in and gives a path to the credentials file.
+The owner gives five inputs, fixed for the study. The deployment: the target and the drafter with
+their revisions and precision, the tokenizer, processor and chat-template settings, the engine build,
+the GPU, the GPUs per engine, and the batch sizes: a batch size B is the number of tasks, or of
+independent requests, the client keeps in flight (replay.md, rule 4). Stock: the drafter's released
+configuration on the engine. The requests: real traffic in replay.md's format, with a group field for
+the gain (the paper's benchmarks). The decoding rule: greedy, or sampling with its temperature, top-k
+and top-p. The budget: GPUs at once, time, rounds, and whether sub-agents may run.
 
 ## Steps
 
-The method is SpecPilot's; [references/cost-model.md](references/cost-model.md) defines every
-quantity below and how it is measured. The speedup of speculative decoding over decoding
-without it is S = τ / c, where τ is the tokens committed per request per decode step and c is
-the time of one speculative step divided by the time of one step without speculation. Each
-round finds which of three factors leaves the most room, works on that factor, and keeps a
-change only on paired evidence. Keep notes in the work directory: every number, the command
-that produced it, and every decision with its reason.
+Steps 1 and 2 run once; each round then runs steps 3 to 8. Every step ends with a gate, its Check,
+and the next step starts only when the gate holds. The next round starts from the round's final system
+if it passed step 7, else from the round's starting system.
+
+The main session is the controller and the master. The controller alone holds the sealed requests,
+the frozen configuration and the raw results; it runs every comparison and lossless check and gives
+sub-agents only their verdicts and the development requests. The master plans directions and writes
+no patch. A sub-agent implements one direction in its own git worktree and submits it as a commit; it
+never reads the sealed requests or changes the controller. Nothing is derived from the sealed
+requests before step 7, and each round's step 7 uses its own sealed part once. The controller notes
+every number with its command, every decision with its reason, and every direction with its factor,
+headroom and outcome.
+
+Work runs in parallel wherever the rules below allow. A run's times (step times, request rates,
+profiles) depend on what else its machine runs; its outputs (tokens, log-probabilities, scores,
+lattices, test counts) do not.
+
+Runs in parallel:
+- Runs used only for their outputs, on any free slots: the lossless procedures' runs and their
+  scoring, the AR runs of Procedure 1, Procedure 4's tests, the lattice recording of step 3.
+- Measurements that are not compared with each other, on separate machines: the batch sizes of steps
+  2 and 3, and comparisons of different patches against the same current best.
+- The sub-agents of steps 4 and 6, each on its own slots, also while the controller measures.
+- Sub-steps 2 to 5 of step 2: each waits only for the runs it reads. If stock fails Procedure 1,
+  everything sub-steps 3 to 5 measured is measured again on the fixed stock (Procedure 5).
+
+Never in parallel:
+- Anything else on a machine while it measures times.
+- The pairs of one comparison, the stock-against-stock pairs of the noise included: one after another
+  on the same two slots of one machine, with the slots swapped between pairs. The two runs of one pair
+  run at the same time; that is what makes them a pair.
+- At one batch size, the cost model's timing runs: the starting system's run (in round 1, the run of
+  step 2.3), its profiled run and the runs of the replayed budgets, one after another on one slot
+  (cost-model.md, steps 1, 3 and 5).
+- Decisions: one at a time. When a patch is promoted, every undecided patch is timed again against the
+  new current best.
 
 ### 1. Split the requests
 
+Split the requests into the development file and one sealed part per planned round (replay.md,
+rule 6):
+
 ```bash
 python skills/optimize-speculative-decoding/scripts/split_requests.py <requests.jsonl> \
-  --out-dir <work>/requests --salt <study name>
+  --out-dir <work>/requests --salt <study name> --sealed-parts <rounds> [--group-field <task field>]
 ```
 
-When the requests are turns of multi-turn sessions, add `--group-field <session field>` so a
-session's turns stay in one set. The sealed set (30 % of requests) stays unused until step 7.
-Every other step uses the exploration set.
+Every run from here on follows replay.md, with the development cap on the output length (the paper:
+2048 tokens).
 
-A run decodes for a few minutes. When the exploration set holds far more, fix one order of its
-sessions whose prefixes keep the whole set's mix of context lengths, and give every arm at a
-batch size the same prefix. Cap `max_new_tokens` at a high percentile of the set, so one very long
-answer does not decide when a run ends.
+**Check**: the counts and sha256 of every file, the parts and the cap are in the notes.
 
-**Check**: both files exist, their counts and sha256 are in the notes, with the order, the cap and
-the prefix of each batch size.
+### 2. Tune stock, check it, measure the starting point, freeze the controller
 
-### 2. Measure the starting point
+1. Tune stock for this GPU and regime with the fastest upstream engine options that leave outputs
+   unchanged; on H100 the paper's stock is the released configuration.
+2. Run lossless.md Procedure 1 on stock. If stock fails, follow Procedure 5 and continue only with the
+   fixed stock.
+3. At every batch size, run stock on the development requests and read τ, T_step and the context
+   over all the run's decode steps with `decode_steps.py` (cost-model.md, procedure step 1). The
+   request set must hold at least B tasks, with `--session-copies` when needed: the client refuses a
+   smaller one, which could not keep B in flight.
+4. Under greedy decoding, run stock against stock at batch size 1, when the study has it, at least
+   four pairs, and freeze the noise, the root mean square of (gain − 1): `paired_ab.py --noise-only
+   --base stock <run dirs> --expect-batches 1 --groups <requests.jsonl> --group-field <group field>`.
+   Under sampling, measure no noise. The noise is used only where the two systems' outputs are
+   identical on every request (step 5); when a comparison at another batch size has identical
+   outputs, `paired_ab.py` asks for the noise of that batch size, measured the same way.
+5. Under greedy decoding, calibrate δ (lossless.md, Procedure 2, step 1).
+6. Write the frozen configuration: the deployment, stock, the request files and their sha256, the batch
+   sizes, the slots, the decoding rule, the caps, the noise, δ, K and the scorer's settings. It changes
+   only by the owner's decision, recorded in the notes.
 
-A run is one engine and one client. Start `decoupled-engine` with the model, the draft
-arguments of the starting configuration and `--sched-trace-dir <run>/trace`, without
-`--disaggregation-mode`, so it serves requests by itself: these measurements are about one
-engine at a fixed batch size, not the router. [`deploy-stack`](../deploy-stack/SKILL.md) covers
-the image and the model paths; if the engine does not start, use
-[`diagnose-run`](../diagnose-run/SKILL.md). Then, for each batch size:
+**Check**: stock passed Procedure 1; τ, T_step and the context per batch size, and the noise where
+step 2.4 measured it, are in the notes; the frozen configuration exists.
 
-```bash
-python skills/optimize-speculative-decoding/scripts/fixed_batch_client.py --endpoint http://<host>:<port> \
-  --requests <work>/requests/explore.jsonl --concurrency <B> --out <run> \
-  --arm start --node <GPU node> --cycle 0 --trace-dir <run>/trace
-python skills/optimize-speculative-decoding/scripts/decode_steps.py <run>/trace --concurrency <B> \
-  --start <t_start> --end <t_end>      # from <run>/run.json
-```
+### 3. Phase 0: compute the ceiling
 
-Repeat with speculation off: same model, GPUs and arguments, without the draft arguments. Its
-step time is the denominator of c, and its outputs are the target model's own tokens for the
-exploration set. When one engine serves several client runs, `POST /flush_cache` between them.
+Follow the procedure of cost-model.md at every batch size, on the round's starting system:
 
-**Check**: for each batch size, `decode_steps.py` reports a few hundred plain steps or more,
-and its τ agrees within a few percent with the accepted tokens per verify step that the client
-prints from the engine's replies (the client counts every verify step, `decode_steps.py` only
-full-batch steps).
+    ceiling = (τ_best / τ) × (T_prof / T_floor) × (T_step / T_prof)
 
-### 3. Find the largest factor
+The largest of the three factors is the round's gap. The ceiling assumes one draft per exact pass.
 
-The room left in a configuration is the product of three factors, measured at each batch size:
+**Check**: the ceiling table of cost-model.md, step 8, exists for every batch size.
 
-- **Drafting**: the largest S among draft settings divided by S now. Rerun the exploration set
-  with the outputs of the run without speculation forced (`--forced-from <run without
-  speculation>`), under each draft setting worth trying (more or fewer draft tokens, deeper or
-  wider trees, other budgets), so every setting is measured on the same tokens. Compute each
-  setting's S with its own step time: a setting that verifies fewer rows can have the larger S
-  with a smaller τ. The engine rejects forced outputs for draft methods that do not support them;
-  for those, measure each setting with paired live runs (step 5), whose outputs diverge.
-- **Kernels**: the GPU busy time of one step divided by its floor. While the client holds the
-  full batch:
+### 4. Phase 1: explore directions in parallel
 
-  ```bash
-  curl -X POST http://<host>:<port>/start_profile -H 'Content-Type: application/json' \
-    -d '{"output_dir": "<run>/profile", "num_steps": 200, "activities": ["CPU", "GPU"]}'
-  python skills/optimize-speculative-decoding/scripts/profile_steps.py <one GPU's trace file>
-  python skills/optimize-speculative-decoding/scripts/byte_floor.py --model-dir <model> --requests <B> \
-    --rows-per-request <target rows per request per step> --context-tokens <mean context> \
-    --peak-tflops <datasheet> --peak-tbps <datasheet> [--kv-bytes-per-token ...] [--state-bytes-per-request ...]
-  ```
+1. Plan directions only after step 3's table exists. A direction is an idea aimed at one of the
+   largest factors; it names that factor and its headroom, the expected gain. Work outside the decode
+   step, such as tokenization, image processing or scheduling between requests, is not a direction.
+2. Run the most promising few directions at once, one sub-agent each. A sub-agent implements its
+   direction as patches behind options whose defaults reproduce stock.
+3. The sub-agent checks the headroom with the cheapest evidence first: byte arithmetic, exact replay,
+   a microbenchmark, then a timing run on one GPU. It builds a new algorithm only when the headroom,
+   net of runtime overhead, is at least 3 %, and keeps smaller measured patches for step 6. It closes a
+   direction only after measuring the implemented mechanism, unless that takes more than 10
+   GPU-minutes.
+4. Before the controller times a patch, the patch passes its correctness tests and, on development
+   requests at the largest batch size, lossless.md Procedure 2 under greedy decoding, or Procedure 3
+   under sampling and Procedure 4 when it changes the sampling code. A patch that fails goes back to
+   its sub-agent. A patch kept for step 6 is checked as part of the stack that is timed.
 
-  `/start_profile` returns at once and writes the trace after `num_steps` steps and an export:
-  start it when the client still has at least that many full-batch steps to go, and keep the
-  engine up until the file exists. Each script's `--help` says what its numbers mean and where
-  its inputs come from. Give each kernel class that `byte_floor.py` does not model a floor by the
-  same rule; for the all-reduces between GPUs the floor is the bytes each GPU moves over the link
-  bandwidth ([references/cost-model.md](references/cost-model.md)). Check the class of the top
-  kernels that `profile_steps.py` lists.
-- **Overhead**: the wall time of the profiled steps divided by their GPU busy time, both from the
-  same profile (`profile_steps.py` prints both): time in which the GPU waits for the CPU,
-  launches or synchronization.
-
-**Check**: a table per batch size with τ, S, the largest S of the draft settings, step time, GPU
-busy time and floor per step, the three factors, and the largest one named.
-
-### 4. Choose directions for the largest factor
-
-| Largest factor | Where to look | Cheapest evidence |
-|---|---|---|
-| Drafting | draft length and tree shape; how a batch shares a budget of draft tokens; another draft method the engine has; proposals copied from the context | exact replay with forced outputs (step 3) |
-| Kernels | the classes furthest above their floor | the kernel alone at the step's shapes on one GPU |
-| Overhead | CPU work between steps, shapes without CUDA graphs, metadata rebuilt every step, synchronization | the idle gaps in the profile |
-
-The regime decides which mechanisms pay: work added to every verify step helps a single request
-and costs a full batch, while choosing which rows to verify helps a full batch
-([references/cost-model.md](references/cost-model.md)). Work on several directions in parallel
-where possible. Build a mechanism only when the evidence shows at least 3 % of room after its
-own cost. Close a direction only after measuring the implemented mechanism, unless one
-measurement costs more than 10 GPU-minutes. Every change goes behind a flag or environment
-variable that is off by default.
-
-**Check**: every direction has its evidence number and a decision (build or close) in the notes.
+**Check**: every direction has its factor, headroom, evidence, outcome and decision in the notes, and
+every patch sent to step 5 passed its lossless procedures.
 
 ### 5. Promote with paired runs
 
-Within one job on one GPU node, runs of the starting configuration (`--arm base`) and of the
-change (`--arm <change>`) alternate, one cycle each (base, change, base, change, ...), each run
-on a freshly started engine; a second node runs the same with the arms in the other order. A
-pair is the base run and the change run of one cycle on one node.
+1. Time the patch against the current best: stock in the first round, then the last promoted system.
+   A pair is one run of each system at the same time on the two slots of one machine, on the same
+   development requests, at the same batch size, to the end.
+2. Fix the number of pairs before the first run.
+3. Run the comparison once:
 
-```bash
-python skills/optimize-speculative-decoding/scripts/paired_ab.py --base base --cand <change> <run dirs ...>
-```
+   ```bash
+   python skills/optimize-speculative-decoding/scripts/paired_ab.py --base <current best> --cand <patch> \
+     <run dirs ...> [--noise <frozen B:X,...>] --expect-pairs <n> --expect-batches <B,...> \
+     --groups <requests.jsonl> --group-field <group field>
+   ```
 
-It prints the speed ratio of every pair, the mean ratio with its 95 % interval and per node, the
-noise (base against base), the split of the ratio into τ and step time, and the decision:
-promote when the lower end of the interval exceeds 1 % plus twice the noise. It refuses to
-decide when a run has no partner or no plain steps.
+The gain of a pair is the geometric mean of the per-request output-rate ratios within each group,
+combined by an equal-weight geometric mean over the groups. The patch is promoted at a batch size when
+the 95 % lower bound of the gain exceeds 3 % when the outputs of the two systems differ on any
+request, else 1 % plus twice the frozen noise of that batch size.
 
-- **Number of pairs.** Fix it before the first run of a comparison, from the noise of the
-  starting point and the smallest ratio r worth promoting: n pairs with t × noise / √n below
-  r − 1.01 − 2 × noise, where t is the 95 % t value for n − 1 degrees of freedom (3.2 for four
-  pairs, 2.3 for nine), and at least two cycles on each of two nodes. Live runs diverge and
-  have more noise. Adding pairs after a near miss decides on the data: judge the added pairs on
-  their own.
-- **One node at a time.** When the budget holds one node of the size a batch needs, run the
-  second node's block after the first, with the arms in the other order. Compare single changes
-  where a comparison is cheap, and only their stack where it is expensive.
-- **Nodes that disagree.** When the per-node ratios differ by more than the noise while the base
-  runs agree, report each node's ratio and look at the slower node before promoting.
+**Check**: the decision, its command and its numbers are in the notes.
 
-**Check**: the base-against-base interval it prints contains 1, and the decision is in the notes.
+### 6. Phases 2 and 3: integrate, tune kernels
 
-### 6. Stack, tune kernels, repeat
+An integration sub-agent stacks the patches that gain too little to be promoted alone on the current
+best. A kernel sub-agent profiles the current best and tunes the kernels furthest from their byte
+floors. Step 4's lossless procedures run once on the system that is timed, the stack, not on each
+patch in it; when the stack fails, its patches are checked one at a time to find the one that fails.
+The stack is timed under step 5's rule.
 
-Changes that each showed at least 3 % of room but did not pass promotion alone are stacked and
-measured as one change with step 5. Then tune the kernels furthest above their floor; Nsight
-Compute belongs here, once the factors say which kernels matter. After every promotion, return
-to step 3: the largest factor changes.
+**Check**: every promotion of the round has its paired result.
 
-**Check**: every round has its own factor table and the paired result of what it promoted.
+### 7. Phase 4: sealed final
 
-### 7. Seal the result
+1. On the round's sealed part, time the final system against stock, two paired runs per batch size:
 
-Once, on the sealed set, at each batch size: step 5 with the starting configuration as base and
-the final configuration as the change. Then check that the final configuration commits the
-target model's tokens as faithfully as the starting one. Score the outputs of both sealed runs
-on an engine without speculation, and compare. Under greedy decoding `--score-from` gives the
-target's first choice at every position:
+   ```bash
+   python skills/optimize-speculative-decoding/scripts/paired_ab.py --sealed --base stock --cand <final> \
+     <run dirs ...> --expect-pairs 2 --expect-batches <B,...> --groups <sealed part> --group-field <group field>
+   ```
 
-```bash
-python skills/optimize-speculative-decoding/scripts/fixed_batch_client.py --endpoint <engine without speculation> \
-  --requests <work>/requests/sealed.jsonl --concurrency <B> --score-from <sealed run> --out <sealed run>/scored
-python skills/optimize-speculative-decoding/scripts/token_forcing.py --base <base scored dirs> --cand <final scored dirs>
-```
+2. Run lossless.md Procedure 2 under greedy decoding, or Procedure 3 under sampling, on the sealed part
+   at every batch size, and on long outputs at the largest batch size.
+3. The final passes when it is faster than stock at every batch size (`--sealed` exits 0) and every
+   lossless procedure passes; otherwise it is rejected whole.
 
-Under the same-draws rule the reference is the token the target draws itself with the same key.
-Replay each sealed run's outputs on the engine without speculation (`--forced-from <sealed run>
---keyed-seed`) and record its draw at every position, with the draw's margin over the runner-up.
-If the engine cannot report its draws, that report is a change of its own, off by default, made
-before this step. Write one line per request with `tok`, `top1` (the draw) and `gap` (the
-margin); `token_forcing.py` reads that format.
+**Check**: the sealed gains per batch size and the lossless verdicts are in the notes.
 
-Both rules must pass: the final configuration's mismatch rate is at most 0.5 percentage points
-above the starting one's, and mismatches where the target is confident (a gap above 2: the
-log-probability of its first choice over its second, or the draw's margin) are not more
-frequent, both at 95 % confidence.
+### 8. Distill memory
 
-**Check**: `token_forcing.py` exits 0. If a rule fails, find the change that breaks it by
-scoring the stack without each change, and remove that change.
+Write one memory entry per promoted mechanism in the work directory: its code delta against stock plus
+the entries it requires, the commit of the system it was promoted in, its options and variants, its
+correctness contract, and a summary of its evidence, limits and untested regimes. Keep an entry only if
+applying it with its requirements to stock reproduces that commit's code exactly. A new deployment
+starts from stock plus chosen entries, tunes and times them again, and does not count them as new
+discoveries.
 
-### 8. Hand over
-
-Each promoted change becomes its own pull request through [`check-pr`](../check-pr/SKILL.md),
-with its paired result.
-
-**Check**: every promoted change has a pull request, or the notes say why not.
+**Check**: for every entry, stock with the entry and its requirements applied has the same tree as
+the commit it was promoted in (`git rev-parse HEAD^{tree}` after committing them equals
+`git rev-parse <commit>^{tree}`).
 
 ## Returns
 
-- The setup: model, draft method, GPU, GPUs per engine, batch sizes, decoding rule, the
-  request set and the sha256 of both splits.
-- Per round: the factor table of step 3, and a row per direction: the factor it targets, its
-  evidence number, the decision, and the paired result (mean ratio, 95 % interval, noise, and
-  the ratio per node when nodes disagree).
-- On the sealed set, per batch size: the speedup over the starting configuration and over
-  decoding without speculation, split into the τ ratio and the step-time ratio. These are
-  ratios of decode-step throughput; the end-to-end effect on a served workload needs
-  [`run-benchmark`](../run-benchmark/SKILL.md).
-- Both lossless rules with their numbers.
-- What was not run, and the decisions that are the owner's: which flags to turn on by
-  default, and whether to run an end-to-end benchmark.
+The frozen configuration, stock's Procedure 1 verdict, and the GPU-hours and time used. Per round: the
+ceiling table, every direction with its factor, headroom, evidence and outcome, and every promotion
+with its paired gain. Per sealed final: the gain over stock at each batch size and the lossless
+verdicts. Then the memory entries, what was not run, and the owner's decisions on which options to
+turn on by default.

@@ -13,7 +13,7 @@ GLM-5.2 on these hosts, following `skills/deploy-stack/SKILL.md`".
 | [`add-harness`](add-harness/SKILL.md) | add a launch script for another agent harness (OpenCode, Aider, ...): which API it sends, how to set its provider per process, one prompt and one tool call | `examples/agents/<harness>.sh` and a row in its README | runs the harness against the stack |
 | [`run-benchmark`](run-benchmark/SKILL.md) | run a paper benchmark (Claude Code, Putnam, OSWorld), score it and compare it with the reference | nothing | a Slurm job on nine GPU nodes for about two hours |
 | [`diagnose-run`](diagnose-run/SKILL.md) | find why a run did not start, failed a request, or scored below the reference | the fix, once the cause is named | none |
-| [`optimize-speculative-decoding`](optimize-speculative-decoding/SKILL.md) | find lossless speedups of speculative decoding for one model, draft method and GPU, each backed by paired measurements | engine changes behind flags that are off by default; a config under `examples/` | GPU jobs on two nodes per comparison |
+| [`optimize-speculative-decoding`](optimize-speculative-decoding/SKILL.md) | run SpecPilot's loop on one speculative-decoding deployment: ceiling, parallel directions, promotion on paired runs, lossless checks, sealed final | engine changes behind options that are off by default | GPU jobs (two engine slots per comparison) and sub-agents |
 | [`check-pr`](check-pr/SKILL.md) | check a change against the contribution rules and fill the pull request description, before opening or re-reviewing a pull request | the fixes for what fails | opens the pull request, publishes the transcript |
 
 They follow one another: `deploy-stack` starts the stack, `connect-agent` sends an agent's

@@ -1,77 +1,91 @@
-# Cost model of speculative decoding
+# Cost model and ceiling
 
-The method of SpecPilot ([arXiv 2611.02501](https://arxiv.org/abs/2611.02501)), as the
-[skill](../SKILL.md) uses it. Every quantity is measured on one engine, at one batch size B,
-on the same requests.
+The procedure of step 3, SpecPilot's Phase 0 ([arXiv 2611.02501](https://arxiv.org/abs/2611.02501),
+sections 3.1, 6.1 and 6.4 and appendix B). It runs at the start of every round, at every batch size,
+on the round's starting system and the development requests, and its output is the ceiling table.
+The batch size B is the number of tasks (or independent requests) the client keeps in flight
+(replay.md, rule 4). The engine's batch, the requests one decode step processes, varies between 1 and
+B during a run, and every quantity below averages over all the decode steps of a run at B, each step
+at its own batch, so that the ceiling and the paired gains describe the same steps.
 
-## Speedup
+## Quantities
 
-- **τ(N)**: tokens committed per request per decode step with draft setting N: the accepted
-  draft tokens plus the one token the target model adds after them. Without speculation τ = 1.
-- **c(N) = T_step(N) / T_AR**: the time of one plain decode step with setting N over the time of
-  one plain decode step without speculation. A plain step is a decode step at the full batch
-  that follows another decode step (`scripts/decode_steps.py`).
-- **S(N) = τ(N) / c(N)**: decode throughput relative to decoding without speculation.
-- Between two configurations at the same batch size, the speedup is
-  (τ_new / τ_old) × (T_step,old / T_step,new). `scripts/paired_ab.py` reports both parts.
+With N proposed nodes per request, τ(N) is the number of tokens a step commits per request: the
+accepted draft tokens plus the one token the target adds after them, summed over the run's decode
+steps and divided by the sum of their batches. T_step(N) is the mean time of a decode step of the
+run, drafting included, so a request commits τ(N) / T_step(N) tokens per unit time. The ceiling is
+the speedup over the starting system that a step would reach if it drafted once, verified the best
+tree in one exact pass, and ran every kernel class at its byte floor:
 
-## The three factors
+    ceiling = (τ_best / τ) × (T_prof / T_floor) × (T_step / T_prof)
 
-The room left in a configuration is
+The three ratios are the τ factor, the kernel factor and the overhead factor.
 
-    (S_best / S) × (T_prof / T_floor) × (T_wall / T_prof)
+## Procedure
 
-- **S_best / S**, drafting. S_best is the largest S among the draft settings, each measured on
-  the same tokens as S with its own step time; a setting that verifies fewer rows can have the
-  larger S with a smaller τ. SpecPilot records the draft model's top candidates at every
-  position of the target model's own outputs, rebuilds the best tree of each size offline, and
-  accepts the longest path that matches the target's tokens, plus one token. The engine does not record
-  candidates; forced outputs (`--forced-from` of `scripts/fixed_batch_client.py`) give the same
-  comparison for the trees the engine can build. Recording candidates is a change of its own,
-  worth making when trees the engine cannot build may matter.
-- **T_prof / T_floor**, kernels. T_prof is the GPU busy time of one step in a profile, drafting
-  included (`scripts/profile_steps.py`). T_floor is the sum over kernel classes of
-  max(FLOPs / (0.6 × peak FLOPs), bytes / (0.9 × peak bandwidth)), where the bytes are what the
-  step must move: every weight once, only the experts the step's rows reach in a mixture of
-  experts, the KV cache of every request, the recurrent state read and written
-  (`scripts/byte_floor.py`). With tensor parallelism over G GPUs, each GPU reads 1/G of the
-  weights and 1/min(G, KV heads) of the KV cache: past G = KV heads the heads are copied.
-  Communication has a floor by the same rule: an all-reduce of M bytes per GPU moves about
-  2 (G − 1) / G × M per GPU in two shots (reduce-scatter, then all-gather) and (G − 1) × M in one
-  shot, over the link bandwidth. Which algorithm runs depends on the message size, and the size
-  at which the engine switches is a setting worth measuring on each interconnect.
-- **T_wall / T_prof**, overhead: the wall time of the profiled steps over their GPU busy time,
-  both from one profile: time in a step that no GPU work covers.
+1. **τ and T_step.** Read τ and T_step of the starting system over every decode step of its run at
+   B, from the run's scheduler trace. This run, the profiled run of step 5 and the budgets' runs of
+   step 3 run one after another on one slot, with nothing else on its machine:
 
-A round works on the largest factor. Recompute all three after every promotion.
+   ```bash
+   python skills/optimize-speculative-decoding/scripts/decode_steps.py <run>/trace \
+     --start <t_start> --end <t_end>      # the window from <run>/run.json
+   ```
 
-## Rules
+   It leaves out only the steps next to a prefill or an idle wait, whose time holds other work, and
+   also prints the run's mean batch and its steps per batch.
 
-- **Evidence before building.** Check a direction's room with the cheapest evidence first:
-  arithmetic on bytes and FLOPs, exact replay, the kernel alone, one GPU. Build only when the
-  room is at least 3 % after the mechanism's own cost. Close a direction only after measuring
-  the implemented mechanism, unless one measurement costs more than 10 GPU-minutes.
-- **Promotion.** Paired runs: the same requests, the two arms alternating on the same GPUs, on
-  two nodes. Promote when the lower end of the 95 % interval of the mean speed ratio exceeds
-  1 + 0.01 + 2 × noise, where the noise is the root mean square of (ratio - 1) between runs of
-  the base arm.
-- **Stacking.** Changes that each show at least 3 % of room but miss promotion alone are
-  measured together as one change.
-- **Lossless only.** Under greedy decoding every committed token is the target model's most
-  likely token. Under sampling, the owner's rule: the token the target draws itself with the
-  same key, or a draw from the target's distribution. Every change is behind a flag that is off
-  by default.
-- **Sealed check.** On requests not used before, with the outputs of both systems scored against
-  the target model's reference (its first choice, or its own keyed draw): the mismatch rate, compared within bins of the target's confidence and weighted
-  by the base's bins, rises by at most 0.5 percentage points; mismatches where the target's
-  first choice leads its second by more than 2 in log-probability (or the keyed draw leads by
-  that margin) are not more frequent. Both at 95 % confidence (`scripts/token_forcing.py`).
+2. **Lattices.** Record the drafter's lattices in a run of the starting system on development
+   requests. A lattice holds, for one drafting step of one request (keyed by the `rid` the client
+   sends), the drafter's top candidates at each drafted position with their scores, the score row
+   given the committed anchor, and, when the drafter scores pairs, the score of each candidate given
+   each candidate at the position before (`exact_replay.py --help` gives the format). The recorder is
+   an engine hook, off by default; when the engine has none, adding it is the round's first patch.
+3. **T_step(N).** For each node budget N to replay, measure the full step time with N proposed nodes
+   per request (drafting, tree construction, verify and commit): the mean step time of `decode_steps.py`
+   over a run of chains or trees of N nodes on the same engine, at B, on the same requests and on step
+   1's slot, never the verify forward alone. A budget of N takes N + 1 rows per request.
+4. **τ factor.** Replay the lattices:
 
-## Which mechanisms pay depends on the batch
+   ```bash
+   python skills/optimize-speculative-decoding/scripts/exact_replay.py <lattices.jsonl> \
+     --outputs <run>/outputs.jsonl --budgets 8,16,24,32,48,64 --costs <N:T_step(N) in ms,...>
+   ```
 
-- Work added to every verify step, such as more draft tokens per request, raises τ and suits a
-  single request; at a full batch it multiplies the rows the target model processes.
-- Choosing which rows to verify, such as one budget of draft tokens shared by the batch or a
-  draft length per request, suits a full batch.
-- In a mixture of experts, extra rows reach more experts, and each new expert costs its weight
-  bytes, until every expert is reached.
+   The script builds, for every budget, the best-first tree: a node's path score is the sum of its
+   edges' scores, an edge's score is the log softmax over its parent's children (of the pair scores
+   given the parent when the drafter has them, else of the position's own scores), and the tree of
+   budget N is the first N nodes in order of path score. It reports τ(N) of these trees, the chain's
+   τ and the oracle's τ, the tokens accepted while the target's token is among the position's
+   candidates. Under greedy decoding a tree accepts the longest root path whose tokens equal the
+   target's, plus one token; under sampling it uses the verify that samples the target's token at each
+   node and continues through the child that holds it. τ_best is τ(N) at the N with the largest
+   τ(N) / T_step(N), and the τ factor is τ_best / τ.
+5. **T_prof.** On step 1's slot, run the starting system again at B and profile it in windows spread
+   through the run (for example a quarter, half and three quarters of the way), and pass one GPU's
+   traces of all the windows to
+   `scripts/profile_steps.py`, cut at the first kernel of the exact pass with `--anchor-kernel`. T_prof
+   is the mean GPU busy time per step over the pooled steps, by kernel class.
+6. **T_floor.** T_floor is the mean over the profiled steps of each step's floor at its own batch:
+   `decode_steps.py --windows` over the profile windows gives their steps per batch and their context,
+   which `byte_floor.py --batch-mix` and `--context-tokens` take. A step's floor sums, class by class,
+   the larger of its FLOPs at 60 % of the GPU's peak dense throughput and its bytes at 90 % of peak
+   bandwidth. The target GEMMs read every weight once per step, or in a mixture of experts the experts
+   the rows reach. Attention reads every request's KV cache once, 1/min(G, KV heads) of it per GPU with
+   tensor parallelism over G GPUs; a sliding-window layer reads at most its window. Recurrent layers
+   read and write every request's state and update it for every row. The drafter does its own work as
+   many times as it runs per step, with its own experts and its own tied output layer. Prefill
+   processes the step's prompt tokens with their attention, with one more weight read per prefill
+   forward of its own, of the experts its chunk's tokens reach. Sampling reads the logits once. A
+   one-shot all-reduce of M bytes moves (G − 1) × M per GPU and a two-shot one 2 (G − 1) / G × M, over
+   the link bandwidth. Every other class follows the same rule.
+   `scripts/byte_floor.py` computes the weight, attention, recurrent-state, drafter and prefill
+   classes from the checkpoint; tensors copied to every GPU, weights shared with the target and
+   formats converted at load are corrected by hand. The kernel factor is T_prof / T_floor.
+7. **Overhead factor.** T_step / T_prof, with T_step from step 1.
+8. **Table.** Write, per batch size: the mean batch, τ, the oracle's τ, τ_best and its N, T_step(N) at
+   that N, T_step, T_prof, T_floor by kernel class, the three factors, their product, and the largest
+   factor, which is the round's gap.
+
+A tree chosen from the replay is used in a direction only after it is implemented and its live tokens
+per step equal the replay's on the same requests within the run's noise.
