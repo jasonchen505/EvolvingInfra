@@ -5,15 +5,18 @@ plus a little more. Plain LRU eviction treats that context like any other cache 
 evicts it during the pause. KV retention lets the router tell the engines which context agents
 still need, so the engines evict unreferenced KV first.
 
-Retention runs on models with a FULL-only cache tree, such as GLM-5.2 and Kimi-K2.6.
+The engine takes retention on a FULL-only or FULL+SWA cache tree. The symmetric preset turns it on
+for models with a FULL-only tree (GLM-5.2, Kimi-K2.6) and for DeepSeek-V4 (FULL+SWA). Another model
+with sliding-window layers needs `--enable-kv-session-retention` on its engines, and a model with a
+Mamba state runs without retention.
 
 ## Use it
 
 Retention is on by default: engines in symmetric mode turn on `--enable-kv-session-retention` with
 a write-through host tier, and `--policy symmetric_pd` turns on
 `--symmetric-pd-kv-session-retention`. Under late D the engine also turns on
-`SGLANG_KV_SESSION_ADMIT_TAG`, so the chosen D counts the branch. On a model without a FULL-only
-cache tree the engine keeps retention off and ignores the router's session tags.
+`SGLANG_KV_SESSION_ADMIT_TAG`, so the chosen D counts the branch. An engine without
+retention ignores the router's session tags.
 
 Clients tag every request with `x-agent-context` and end each branch with
 `POST /kv_sessions/end` (below).
@@ -31,6 +34,15 @@ referenced pages, the session predicted to return last goes first: the engine es
 remaining idle time from how long the session has been idle, and treats a session idle for 150 s
 or longer as finished. `SGLANG_KV_SESSION_RETENTION_ORDER=lru` orders them by last access
 instead. The version moves forward on every new request of the branch and whenever its P changes.
+
+On a FULL+SWA tree the host keeps sliding-window (SWA) copies in a pool of their own, and a
+session resumes only from the window that ends its context. Pressure on that pool frees SWA copies
+in the same order, with one more rule: the windows that live sessions resume from go last. A
+session counts as ready on a worker once that window is on the host with the FULL copy.
+
+Each eviction call ranks every host candidate. `SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION` (default
+0) makes a call free at least that fraction of the host pool, so that a large host tier is ranked
+less often; the DeepSeek-V4 H200 configs set 0.01.
 
 **Moving a session.** When a branch's next request goes to a different P, the old worker keeps
 its copy until the new P reports the full context ready. Then the router releases the old

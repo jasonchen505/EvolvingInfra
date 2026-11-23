@@ -1890,6 +1890,12 @@ class Envs:
     # registers its D leg with that tag when the ADMIT applies, so only the
     # admitted candidate registers. Off: ADMIT frames are unchanged.
     SGLANG_KV_SESSION_ADMIT_TAG = EnvBool(False)
+    # --enable-kv-session-retention host eviction: each evict_host frees at
+    # least this fraction of the asking host pool. The retention walk heaps
+    # every host candidate per call, so one-page calls cost O(tree) each and
+    # the scheduler slows as the host tree grows; a batch amortizes the walk.
+    # 0 (default) frees the requested tokens only.
+    SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION = EnvFloat(0.0)
     SGLANG_HUGEPAGE_SIZE = EnvStr("")
     # Bind host-dedup source-pool stripes to the owner's and the other NUMA node
     # (mbind before first touch); see pool_host/numa_split.py. 1 = on (refuse to

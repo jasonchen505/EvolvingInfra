@@ -31,8 +31,8 @@ EVOLVING_INFRA_REPLAY (environment, JSON) replaces the settings derived from sta
 prepared_replay.Config fields plus:
   tokenizer_urls     one frontend URL per Trie process; process i is the i in
                      output_json=.../trie-results-<i>.json (a single URL may be given as tokenizer_url);
-  retention_enabled  send session END (default false; the validated DSV4 runs ran with KV session
-                     retention off, and a refused END would count as a client failure);
+  retention_enabled  send session END (default false: a router without KV session retention
+                     refuses END, and a refused END counts as a client failure);
   end_outcomes       branch outcomes that send END when retention is enabled
                      (default ["complete", "cancelled", "skipped_or_incomplete", "failed"]).
 Trie must run with cache_salt_mode=global: the prepared path carries one fixed cache salt.

@@ -99,8 +99,7 @@ Common setup:
   holder, and late D choice (`fit_req` over every D at the P leg's first chunk).
 - Replay: Trie with `actual_output` context and model outputs, through the prepared path
   (`benchmarks/replay/run_trie.py`, `cache_salt_mode=global`).
-- **KV session retention off** in engines and router, and no session END from the replay: the
-  engine does not yet support retention on DSV4's FULL+SWA cache tree.
+- KV session retention on in engines and router; the replay ends every branch with a session END.
 - The dynamic benchmark adds the planner's live control loop with external role control on the
   router: a role switch is one `PUT /symmetric_pd/roles` on the router and no engine restarts, so
   worker request counters stay monotonic.

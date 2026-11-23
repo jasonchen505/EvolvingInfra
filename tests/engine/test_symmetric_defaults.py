@@ -177,7 +177,7 @@ def test_host_switches_follow_the_servicer_and_plain_tp():
 
 
 NICS = '{"0": "mlx5_0,mlx5_1", "1": "mlx5_0,mlx5_1", "2": "mlx5_2,mlx5_3", "3": "mlx5_2,mlx5_3"}'
-DSA = {"dedup": "enable_dsa_hicache_host_dedup", "full_only": True}
+DSA = {"dedup": "enable_dsa_hicache_host_dedup", "retention": True}
 
 
 def bare(**kw):
@@ -250,9 +250,12 @@ def test_paper_features_keep_what_the_user_set_and_skip_what_cannot_run():
     assert "disaggregation_late_d" not in f and "disaggregation_late_d_control_port" not in f
     f = sd.plan_features(bare(enable_dp_attention=True), DSA, free_port=lambda: 1)
     assert "disaggregation_late_d" not in f and "enable_dsa_hicache_host_dedup" not in f
-    f = sd.plan_features(bare(), {"dedup": "enable_dsv4_hicache_host_dedup", "full_only": False},
+    # A model the preset gives retention (DeepSeek-V4 here), and one it does not.
+    f = sd.plan_features(bare(), {"dedup": "enable_dsv4_hicache_host_dedup", "retention": True},
                          free_port=lambda: 1, ratio_unset=True)
-    assert f["enable_dsv4_hicache_host_dedup"] and "enable_kv_session_retention" not in f
+    assert f["enable_dsv4_hicache_host_dedup"] and f["enable_kv_session_retention"]
+    f = sd.plan_features(bare(), {"dedup": None, "retention": False}, free_port=lambda: 1)
+    assert "enable_kv_session_retention" not in f
     f = sd.plan_features(bare(), None, free_port=lambda: 1)
     assert "enable_kv_session_retention" not in f and "hicache_ratio" not in f
 
@@ -262,3 +265,14 @@ def test_ib_devices():
     assert sd.ib_devices("mlx5_0") == "mlx5_0"
     assert sd.ib_devices("mlx5_0, mlx5_1,mlx5_0") == "mlx5_0,mlx5_1"
     assert sd.ib_devices(NICS) == "mlx5_0,mlx5_1,mlx5_2,mlx5_3"
+
+
+def test_the_preset_turns_retention_on_for_full_only_models_and_deepseek_v4():
+    full_only = dict(v4=False, hybrid_swa=False, ssm_state=False, npu=False)
+    assert sd.preset_retention(**full_only)
+    assert sd.preset_retention(**{**full_only, "v4": True})
+    # On NPU the DeepSeek-V4 tree has a C128 component, which the cache refuses.
+    assert not sd.preset_retention(**{**full_only, "v4": True, "npu": True})
+    # Another model with sliding-window layers can run on an all-sliding cache.
+    assert not sd.preset_retention(**{**full_only, "hybrid_swa": True})
+    assert not sd.preset_retention(**{**full_only, "ssm_state": True})

@@ -33,8 +33,8 @@ m run --detach examples/modal/app.py::paper
 
 `stack.py` holds every command and setting (memory fraction 0.71,
 host tier 4.445, DSPARK with a fixed oracle accept rate 0.6, peer-KV servicer, late D, cost-function
-P selection with pull hints). KV session retention is off in engines and router and the replay sends
-no session END: the engine does not support retention on DSV4's FULL+SWA tree yet.
+P selection with pull hints). KV session retention is on in engines and router, and the replay ends
+every branch with a session END.
 
 ## How a run is judged
 

@@ -6,7 +6,7 @@ default), resolution first turns on the features of the paper's configuration
 that the other flags leave off (:func:`plan_features`): the host KV tier, the
 prefill work snapshot, late decode choice computing before the decode is
 bound, the peer KV servicer and pulls (when the RDMA devices are known), KV
-session retention (FULL-only models) and host dedup for the model's attention
+session retention (FULL-only models and DeepSeek-V4) and host dedup for the model's attention
 kind (single-node TP). ``--symmetric-preset none`` leaves the flags as given.
 
 Each switch below is an environment variable that is off on its own. When the
@@ -234,7 +234,7 @@ def plan_features(
 ) -> Dict[str, Any]:
     """The server-argument fields of the paper's configuration still off.
 
-    ``model``: ``{"dedup": <dedup flag name or None>, "full_only": bool}``
+    ``model``: ``{"dedup": <dedup flag name or None>, "retention": bool}``
     from the model configuration; None skips dedup and retention.
     ``ratio_unset``: the user gave no ``--hicache-ratio``; with host dedup it
     becomes the paper's 4 (4.445 with the peer KV servicer, which withholds
@@ -295,7 +295,7 @@ def plan_features(
             # The paper's ratio is a fixed setting: keep host-pool auto-sizing off for it.
             fields["hicache_host_memory_fraction"] = None
         if (
-            model.get("full_only")
+            model.get("retention")
             and not getattr(cfg, "enable_kv_session_retention", False)
             and not getattr(cfg, "disable_radix_cache", False)
             and getattr(cfg, "radix_eviction_policy", "lru") == "lru"
@@ -304,8 +304,25 @@ def plan_features(
     return fields
 
 
+def preset_retention(*, v4: bool, hybrid_swa: bool, ssm_state: bool, npu: bool) -> bool:
+    """Whether the preset turns KV session retention on for a model.
+
+    The cache takes retention on a FULL-only or FULL+SWA tree
+    (unified_radix_cache._KV_SESSION_RETENTION_COMPONENTS). The preset turns
+    it on where the model fixes such a tree: DeepSeek-V4 (FULL+SWA; on NPU its
+    tree has a C128 component too), or no sliding-window layers and no Mamba
+    state. Another model with sliding-window layers can run on an all-sliding
+    cache, which has no retention; it takes --enable-kv-session-retention
+    when its tree is FULL+SWA.
+    """
+    if v4:
+        return not npu
+    return not (hybrid_swa or ssm_state)
+
+
 def model_info(server_args: Any) -> Optional[Dict[str, Any]]:
-    """The host dedup flag and FULL-only tree of the configured model, or None."""
+    """The host dedup flag of the configured model and whether the preset
+    turns KV session retention on for it (preset_retention), or None."""
     try:
         from decoupled_engine.srt.arg_groups.overrides import model_config_of
         from decoupled_engine.srt.configs.model_config import (
@@ -326,9 +343,15 @@ def model_info(server_args: Any) -> Optional[Dict[str, Any]]:
         else:
             dedup = None
         from decoupled_engine.srt.mem_cache.kv_cache_builder import uses_ssm_state
+        from decoupled_engine.srt.utils import is_npu
 
-        full_only = not (v4 or getattr(config, "is_hybrid_swa", False) or uses_ssm_state(config))
-        return {"dedup": dedup, "full_only": full_only}
+        retention = preset_retention(
+            v4=v4,
+            hybrid_swa=getattr(config, "is_hybrid_swa", False),
+            ssm_state=uses_ssm_state(config),
+            npu=is_npu(),
+        )
+        return {"dedup": dedup, "retention": retention}
     except Exception as e:  # no model config at resolution (tests, dummy paths)
         logger.info("Symmetric defaults: model not inspected (%s)", e)
         return None

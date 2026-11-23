@@ -31,6 +31,14 @@ def test_actual_restore_counter_normalizes_rank_replicas_and_brackets(tmp_path):
         read_restore_counters(path, 4)
 
 
+def test_per_rank_series_outside_one_per_tp_rank_are_ambiguous(tmp_path):
+    path = tmp_path / "telemetry.gz"
+    for ranks, replicas in (((0, 1, 1), 4), ((0, 1, 2), 2)):  # a repeated rank; a rank beyond the TP size
+        write_telemetry(path, [restore_record(0, 8, tp_ranks=ranks)])
+        with pytest.raises(ValueError, match="Ambiguous"):
+            read_restore_counters(path, replicas)
+
+
 def test_telemetry_rows_parse_as_restore_counters(tmp_path):
     body = ("# HELP sglang:hicache_backup_bytes_total Bytes.\n# TYPE x counter\n"
             'sglang:load_back_tokens_total{model_name="m",pool="kv"} 400.0\n'

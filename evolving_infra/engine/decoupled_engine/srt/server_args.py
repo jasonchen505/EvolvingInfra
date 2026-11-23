@@ -578,7 +578,7 @@ class EiMemory(msgspec.Struct):
     ] = 16.0
     enable_kv_session_retention: A[
         bool,
-        "Track versioned trajectory references for CPU KV eviction without enabling native session-cache behavior. Requires the unified FULL-only write-through HiCache.",
+        "Track versioned trajectory references for CPU KV eviction without enabling native session-cache behavior. Requires the unified FULL-only or FULL+SWA (e.g. DeepSeek-V4, any --dsv4-uniform-swa-residency) write-through HiCache.",
     ] = False
     enable_dsv4_hicache_host_dedup: A[
         bool,
@@ -887,7 +887,7 @@ class EiDisagg(msgspec.Struct):
         "the host KV tier, the prefill work snapshot, late decode choice "
         "(need, first_chunk), the peer KV servicer and pulls when "
         "--disaggregation-ib-device is set, KV session retention on FULL-only "
-        "models, and host dedup for the model's attention kind on single-node "
+        "and FULL+SWA models, and host dedup for the model's attention kind on single-node "
         "TP. 'none': the flags as given.",
     ] = "paper"
     disaggregation_late_d_lead_min_reqs: A[

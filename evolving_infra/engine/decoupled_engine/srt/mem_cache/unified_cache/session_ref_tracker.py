@@ -196,7 +196,8 @@ class KvSessionStats:
     prefetch_extended: int = 0
     # Host tokens freed by the retention eviction, by (class, kind): class 0
     # has no session reference; kind "host" is a host-only leaf, "dup" the
-    # host copy of a GPU-resident node.
+    # host copy of a GPU-resident node, "drop" a device leaf that the window
+    # SWA residency host headroom deleted whole (GPU copy too; window only).
     evicted_tokens: dict[tuple[int, str], int] = field(default_factory=dict)
     # Of those, tokens of nodes that a live request's registration covered
     # (host_session_active > 0). The soft pin makes them the last victims of
@@ -215,17 +216,37 @@ class KvSessionStats:
     evicted_c1_idle_tokens: list[int] = field(
         default_factory=lambda: [0] * len(IDLE_AGE_NAMES)
     )
+    # FULL+SWA trees: SWA host tokens freed by the retention eviction, by
+    # class, and of those the tokens of nodes with host_session_active > 0
+    # and of resume windows (KvSessionRetention.swa_resume_nodes; non-uniform
+    # SWA pressure only).
+    swa_evicted_tokens: dict[int, int] = field(default_factory=dict)
+    swa_evicted_active_tokens: int = 0
+    swa_evicted_resume_tokens: int = 0
 
     def note_abort(self, reason: str) -> None:
         self.aborts[reason] = self.aborts.get(reason, 0) + 1
 
     def note_host_eviction(
-        self, rank: int, duplicate: bool, tokens: int, active: bool = False
+        self, rank: int, kind: int, tokens: int, active: bool = False
     ) -> None:
-        key = (rank, "dup" if duplicate else "host")
+        """``kind``: 0 a host-only copy, 1 a duplicate, 2 a device leaf dropped
+        whole (UnifiedTreeCore._retention_eviction_key)."""
+        key = (rank, ("host", "dup", "drop")[kind])
         self.evicted_tokens[key] = self.evicted_tokens.get(key, 0) + tokens
         if active:
             self.evicted_active_tokens += tokens
+
+    def note_swa_host_eviction(
+        self, rank: int, tokens: int, active: bool = False, resume: bool = False
+    ) -> None:
+        if not tokens:
+            return
+        self.swa_evicted_tokens[rank] = self.swa_evicted_tokens.get(rank, 0) + tokens
+        if active:
+            self.swa_evicted_active_tokens += tokens
+        if resume:
+            self.swa_evicted_resume_tokens += tokens
 
     def note_class1_idle(self, age_s: float, tokens: int) -> None:
         self.evicted_c1_idle_tokens[idle_age_bin(age_s)] += tokens
@@ -240,6 +261,9 @@ class _KvRegistration:
     input_key: object
     key: object
     anchor: object = None
+    # Tokens from the root to the anchor's end (0 without an anchor). Set
+    # with the anchor in _replace_anchor; splits keep it, deletes move it.
+    anchor_tokens: int = 0
     state: str = "pending"
     request_ids: set[str] = field(default_factory=set)
     wait_key: object = None
@@ -334,10 +358,29 @@ class KvSessionRetention:
         states = Counter(entry.state for entry in self.sessions.values())
         # Registrations under handover protection (shown only when non-zero).
         protected = sum(1 for entry in self.sessions.values() if entry.protected)
-        known_zero, class0, active_nodes = self.tree.retention_host_scan()
+        known_zero, class0, active_nodes, swa_scan = self.tree.retention_host_scan()
         st = self.stats
         evicted = st.evicted_tokens
         reasons = ",".join(f"{k}:{v}" for k, v in sorted(st.aborts.items()))
+        # FULL+SWA trees only, so a FULL-only line keeps its fields.
+        swa_fields = ""
+        if swa_scan is not None:
+            swa_evicted = st.swa_evicted_tokens
+            swa_fields = (
+                f"swa_host_tokens={swa_scan[0]} "
+                f"swa_class0_host_tokens={swa_scan[1]} "
+                f"swa_evicted_c0={swa_evicted.get(0, 0)} "
+                f"swa_evicted_c1={swa_evicted.get(1, 0)} "
+                f"swa_evicted_active_tokens={st.swa_evicted_active_tokens} "
+                f"swa_evicted_resume_tokens={st.swa_evicted_resume_tokens} "
+            )
+        # Window SWA residency only: device leaves the host headroom deleted.
+        drop_fields = ""
+        if self.tree._swa_device_window():
+            drop_fields = (
+                f"evicted_c0_drop={evicted.get((0, 'drop'), 0)} "
+                f"evicted_c1_drop={evicted.get((1, 'drop'), 0)} "
+            )
         return (
             f"live={states['pending']} released={states['released']} "
             f"ended={states['ended']} tagged_arrivals={st.tagged_arrivals} "
@@ -348,10 +391,12 @@ class KvSessionRetention:
             f"evicted_c0_dup={evicted.get((0, 'dup'), 0)} "
             f"evicted_c1_host_only={evicted.get((1, 'host'), 0)} "
             f"evicted_c1_dup={evicted.get((1, 'dup'), 0)} "
+            f"{drop_fields}"
             f"prefetch_extended={st.prefetch_extended} "
             f"soft_pin={int(self.active_soft_pin)} "
             f"class0_host_tokens={class0} active_nodes={active_nodes} "
             f"evicted_active_tokens={st.evicted_active_tokens} "
+            f"{swa_fields}"
             f"scan_ms={(time.perf_counter() - start) * 1e3:.1f}"
             + (f" admit_tags={st.admit_tags}" if st.admit_tags else "")
             + (f" protected={protected}" if protected else "")
@@ -505,7 +550,8 @@ class KvSessionRetention:
             if new_anchor.host_session_anchors is None:
                 new_anchor.host_session_anchors = set()
             new_anchor.host_session_anchors.add(entry.session_id)
-        self._watch_missing(entry, sum(len(node.key) for node in new_path))
+        entry.anchor_tokens = sum(len(node.key) for node in new_path)
+        self._watch_missing(entry, entry.anchor_tokens)
 
     def _set_active(self, entry, active):
         """Add/remove one host_session_active level along the current anchor path.
@@ -833,11 +879,42 @@ class KvSessionRetention:
             entry = self.sessions[sid]
             self._replace_anchor(entry, node.parent)
 
+    def swa_resume_nodes(self, window):
+        """Ids of the nodes holding the SWA a live registration resumes from.
+
+        A match can stop only where the last ``window`` tokens have SWA. The
+        next turn of a session stops at its anchor (the whole context, when
+        the client sends back the real output) or at the page-floored end of
+        its input (when it sends another output, e.g. a recorded one). These
+        are the nodes covering the ``window`` tokens before either point; the
+        other SWA copies on the path are older windows (chunk boundaries,
+        earlier turns). Walks only the anchor's last edges, for the non-uniform
+        SWA host eviction (UnifiedTreeCore._drive_retention_swa_host_eviction).
+        """
+        page = self.tree.page_size
+        root = self.tree.root_node
+        nodes = set()
+        for entry in self.sessions.values():
+            if entry.anchor is None or not self._live(entry):
+                continue
+            # The two resume points: the anchor, and the input end below it.
+            high = low = entry.anchor_tokens
+            if entry.input_key is not None:
+                low = min(high, len(entry.input_key) // page * page)
+            node, stop = entry.anchor, high
+            while node is not None and node is not root and stop > low - window:
+                start = stop - len(node.key)
+                if stop > high - window or (start < low and stop > low - window):
+                    nodes.add(node.id)
+                node, stop = node.parent, start
+        return nodes
+
     def reset_storage(self):
         """Invalidate active callbacks on cache flush while retaining message fences."""
         for entry in self.sessions.values():
             # The tree reset dropped every node and its counters.
             entry.anchor = None
+            entry.anchor_tokens = 0
             entry.active = False
             entry.protected = False
             entry.key = entry.input_key = None
@@ -955,11 +1032,9 @@ class KvSessionRetention:
             reply["status"] = "protected"
             return reply
         required = len(entry.key) // self.tree.page_size * self.tree.page_size
-        ready = 0
-        for node in reversed(self._path(entry.anchor)):
-            if not node.backuped or node.write_through_pending_id is not None:
-                break
-            ready += len(node.key)
+        # Committed host copies from the root, and on a FULL+SWA tree the SWA
+        # a resume there needs (UnifiedTreeCore.retention_ready_tokens).
+        ready = self.tree.retention_ready_tokens(self._path(entry.anchor))
         reply.update(
             required_tokens=required,
             ready_tokens=min(ready, required),

@@ -845,10 +845,15 @@ class SparsePrefillChunkCache:
         total_compressed = sum(lengths_cpu)
         lengths = async_h2d(lengths_cpu, dtype=torch.int32, device=device)
         ends = lengths.cumsum(0, dtype=torch.int32)
-        compressed_base = ends - lengths
+        # Where each request's rows start in the packed ``flat_ids``, over the
+        # whole chunk. The gather below reads positions relative to it.
+        packed_base = ends - lengths
+        compressed_base = packed_base
         swa_base = total_compressed + self.swa_offsets[:-1]
         # EI: a chunk split into request groups addresses each group's own
-        # workspace ([its compressed rows][its SWA rows]).
+        # workspace ([its compressed rows][its SWA rows]). Only the bases the
+        # combine reads become group-relative; ``flat_ids`` stays packed over
+        # the chunk, and group g reads its rows [c_start, c_end).
         groups = self._plan_groups(compress_ratio, lengths_cpu)
         if groups is not None and len(groups) > 1:
             compressed_base_cpu, swa_base_cpu = sparse_prefill_group_bases(
@@ -865,7 +870,7 @@ class SparsePrefillChunkCache:
             output_size=total_compressed,
         )
         positions = (
-            torch.arange(total_compressed, device=device) - compressed_base[request_ids]
+            torch.arange(total_compressed, device=device) - packed_base[request_ids]
         )
         pages = page_table[first_q_per_req[request_ids], positions // c_page_size]
         flat_ids = (pages * c_page_size + positions % c_page_size).to(torch.int32)

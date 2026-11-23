@@ -931,12 +931,41 @@ class ExportTable:
         )
         return start, branch
 
-    def reopen_swa_branch_window(self, req: Req) -> None:
-        """Make the window trim_swa kept at the branching point live again for the
-        next insert: the trim moved swa_evicted_seqlen past it."""
+    def insert_swa_branch_window(self, req: Req, insert: Callable[[], None]) -> None:
+        """Run ``insert``, the insert that caches the window trim_swa kept at the
+        branching point, with that window live again: the trim moved
+        swa_evicted_seqlen past it. The SWA between the window and where the
+        trim stopped is already freed, so the cursor goes back there afterwards,
+        and a window the insert did not take is freed."""
+        trimmed_to = req.kv.swa_evicted_seqlen
         window = self.swa_branch_window(req)
-        if window is not None and req.kv.swa_evicted_seqlen > window[0]:
+        if window is not None and trimmed_to > window[0]:
             req.kv.swa_evicted_seqlen = max(window[0], req.cache_protected_len)
+        insert()
+        req.kv.swa_evicted_seqlen = max(req.kv.swa_evicted_seqlen, trimmed_to)
+        self.free_swa_branch_window(req)
+
+    def free_swa_branch_window(self, req: Req) -> None:
+        """Free the window trim_swa kept at a pending branching point, for a
+        request that leaves the export without inserting it. The window lies
+        below swa_evicted_seqlen, where release_kv_cache frees the FULL side
+        only. The request then has no window to cache at the branching point."""
+        window = self.swa_branch_window(req)
+        if (
+            window is None
+            or not req.kv.holds_kv
+            or req.kv.swa_evicted_seqlen < window[1]
+        ):
+            return
+        start = max(window[0], req.kv.swa_dead_lo(self.page_size))
+        if start < window[1]:
+            self.token_to_kv_pool_allocator.free_swa_segment(
+                self.req_to_token_pool.req_to_token[
+                    req.kv.req_pool_idx, start : window[1]
+                ],
+                start_pos=start,
+            )
+        req.swa_branching_seqlen = None
 
     def trim_swa(self, req: Req, pre_len: int) -> None:
         """SWA-tail export: free the exporting request's SWA below both the
@@ -947,7 +976,9 @@ class ExportTable:
         prompt until the reader's DONE (no tree insert while exporting). The
         window at a pending branching point (swa_branch_window) stays: the
         frontier stops at it, then jumps past it, so it lies below
-        swa_evicted_seqlen while still allocated."""
+        swa_evicted_seqlen while still allocated. The request leaves the export
+        through insert_swa_branch_window (the window is inserted) or
+        free_swa_branch_window (it is not)."""
         if self.swa_tail_window is None:
             return
         held_from = max(req.kv.swa_evicted_seqlen, req.cache_protected_len)
@@ -1006,6 +1037,8 @@ class ExportTable:
         self._released_locally.discard(req.transfer_id)
         self._begun_locally.discard(req.transfer_id)
         self._free_aux(req)
+        # The caller frees the request's KV without an insert.
+        self.free_swa_branch_window(req)
         return False
 
     # -- reader-first exports (F-C) ---------------------------------------

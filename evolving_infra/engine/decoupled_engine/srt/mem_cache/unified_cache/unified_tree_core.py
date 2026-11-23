@@ -1442,7 +1442,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         rank = int(node.host_session_count > 0)
         return rank, node.host_last_access_time, node.id
 
-    def _retention_eviction_key(self, node):
+    def _retention_eviction_key(self, node, kind=None):
         """Heap key of the retention host eviction.
 
         (class, active, kind, CPU tick, id), or (class, kind, CPU tick, id)
@@ -1474,42 +1474,104 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         id, break ties. The idle age is read on the TP-lockstep clock, never
         a rank-local one. Class 0 and the order lru keep the key above
         unchanged.
+
+        ``kind`` is how the caller releases the node when it knows: 0 a
+        host-only copy (every candidate of the non-uniform SWA path,
+        _drive_retention_swa_host_eviction), 1 a duplicate, 2 a backed-up
+        device leaf that the window SWA residency host headroom deletes whole,
+        device copy included (drop_backed_device_leaves, W8b). Kind 2 goes
+        after the two others in its class and takes the GPU tick in place of
+        the CPU tick, as drop_backed_device_leaves does; -m still reads the
+        CPU tick, so a class-1 node ranks the same in every kind. With nothing
+        tagged the walk then frees every host-only leaf by CPU recency and
+        drops device leaves coldest first: the base maintainer's order
+        (evict_host, then drop_backed_device_leaves).
         """
         priority = self.host_retention_priority(node)
-        duplicate = node not in self.evictable_host_leaves
+        if kind is None:
+            kind = int(node not in self.evictable_host_leaves)
+        elif kind == 2:
+            priority = (priority[0], node.last_access_time, node.id)
         retention = self.kv_session_retention
         if priority[0] == 1 and retention.predicted_active:
             m = retention.expected_remaining_idle_s(node.host_last_access_time)
             priority = (1, -m) + tuple(priority[1:])
         if retention.active_soft_pin:
             active = int(node.host_session_active > 0)
-            return (priority[0], active, int(duplicate)) + tuple(priority[1:])
-        return (priority[0], int(duplicate)) + tuple(priority[1:])
+            return (priority[0], active, kind) + tuple(priority[1:])
+        return (priority[0], kind) + tuple(priority[1:])
 
-    def retention_host_scan(self) -> tuple[int, int, int]:
-        """Return (known-zero host tokens, class-0 host tokens, active nodes).
+    def retention_host_scan(self) -> tuple[int, int, int, Optional[tuple[int, int]]]:
+        """Return (known-zero host tokens, class-0 host tokens, active nodes,
+        SWA host scan).
 
-        FULL host copies only. Known-zero = tagged and now count 0 (an earlier
-        class-0 rule, kept for comparison); class 0 = count 0 (the current rule);
-        active nodes = host nodes with host_session_active > 0. Scans every
-        node: for the 60 s KV_SESSION_STATS line only, never on a request path.
+        The first three count FULL host copies. Known-zero = tagged and now
+        count 0 (an earlier class-0 rule, kept for comparison); class 0 = count 0
+        (the current rule); active nodes = host nodes with
+        host_session_active > 0. The SWA host scan is (SWA host tokens, of them
+        on count-0 nodes), or None without an SWA component. Scans every node:
+        for the 60 s KV_SESSION_STATS line only, never on a request path.
         """
-        known_zero = class0 = active = 0
+        has_swa = ComponentType.SWA in self.components_by_type
+        known_zero = class0 = active = swa_total = swa_class0 = 0
         for node in self._node_arena.values():
-            host_value = node.component_data[BASE_COMPONENT_TYPE].host_value
-            if host_value is None or node is self.root_node:
+            if node is self.root_node:
                 continue
-            if node.host_session_count == 0:
-                class0 += len(host_value)
-                if node.host_session_known and not node.host_session_unknown:
-                    known_zero += len(host_value)
-            elif node.host_session_active > 0:
-                active += 1
-        return known_zero, class0, active
+            zero = node.host_session_count == 0
+            host_value = node.component_data[BASE_COMPONENT_TYPE].host_value
+            if host_value is not None:
+                if zero:
+                    class0 += len(host_value)
+                    if node.host_session_known and not node.host_session_unknown:
+                        known_zero += len(host_value)
+                elif node.host_session_active > 0:
+                    active += 1
+            if has_swa:
+                swa_host = node.component_data[ComponentType.SWA].host_value
+                if swa_host is not None:
+                    swa_total += len(swa_host)
+                    swa_class0 += len(swa_host) if zero else 0
+        swa_scan = (swa_total, swa_class0) if has_swa else None
+        return known_zero, class0, active, swa_scan
 
     def known_zero_host_tokens(self) -> int:
         """FULL host tokens of tagged nodes whose count is now 0 (stats only)."""
         return self.retention_host_scan()[0]
+
+    def retention_ready_tokens(self, path) -> int:
+        """Tokens of ``path`` (anchor first, root excluded) that a resume can
+        take from the host, counted from the root: FULL host copies with no
+        write-through in flight, plus the SWA a match needs at their end.
+
+        A FULL-only tree counts the FULL copies alone. The uniform lifecycle
+        also needs each node's whole SWA on the host: under window residency a
+        node can hold its FULL host copy before its SWA one (the write-through
+        ack advertises the CPU tier only once both are there, I3). Under full
+        residency every host copy carries its SWA, so the check changes
+        nothing there. A non-uniform tree ends
+        the count at the deepest node boundary whose trailing window holds SWA
+        host copies; as in the SWA match validator, a run without a gap from
+        the root counts at any length.
+        """
+        swa = self.components_by_type.get(ComponentType.SWA)
+        uniform = getattr(swa, "uniform_lifecycle", False)
+        trailing = swa is not None and not uniform
+        ready = resumable = 0
+        run = float("inf")
+        for node in reversed(path):
+            if not node.backuped or node.write_through_pending_id is not None:
+                break
+            if uniform and not self._swa_host_complete(node):
+                break
+            ready += len(node.key)
+            if trailing:
+                if node.component_data[ComponentType.SWA].host_value is None:
+                    run = 0
+                else:
+                    run += len(node.key)
+                if run >= swa.sliding_window_size:
+                    resumable = ready
+        return resumable if trailing else ready
 
     def _inc_hit_count_and_check(self, node: UnifiedTreeNode) -> bool:
         """Increment hit count; check whether a write backup should be fired."""
@@ -2585,18 +2647,35 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         )
 
     def drive_host_eviction(
-        self, component_type: ComponentType, num_tokens: int
+        self, component_type: ComponentType, num_tokens: int, device_drop: bool = False
     ) -> DriveHostEvictionResult:
         """Evict host resources, preferring host-only LRU leaves in write-through.
 
         FULL-only and uniform caches can then reclaim complete GPU-backed host
         copies. Write-back reclaims duplicates before host-only leaves
         (skipped if SGLANG_HICACHE_SKIP_HOST_DUPLICATE_RECLAIM=1).
+
+        ``device_drop`` (session retention under window SWA residency, from
+        the host headroom only): the retention walk may also delete backed-up
+        device leaves whole (_drive_retention_host_eviction). Without
+        retention the headroom calls drop_backed_device_leaves itself.
         """
+        requested = component_type
         component_type = self._uniform_eviction_component(component_type, host=True)
         result = DriveHostEvictionResult()
         if self.kv_session_retention is not None:
-            self._drive_retention_host_eviction(num_tokens, result)
+            if component_type == ComponentType.SWA:
+                # Non-uniform SWA keeps its own host copies (trailing windows).
+                self._drive_retention_swa_host_eviction(num_tokens, result)
+            else:
+                # FULL, or SWA paired with FULL under the uniform lifecycle:
+                # whole-node victims, counted in the pool that asked.
+                self._drive_retention_host_eviction(
+                    num_tokens,
+                    result,
+                    requested,
+                    device_drop=device_drop and self._swa_device_window(),
+                )
             return result
 
         def reclaim_duplicates(reclaim) -> None:
@@ -2660,7 +2739,9 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                 reclaim_duplicates(self._reclaim_host_duplicates)
         return result
 
-    def _drive_retention_host_eviction(self, num_tokens, result):
+    def _drive_retention_host_eviction(
+        self, num_tokens, result, measure=BASE_COMPONENT_TYPE, device_drop=False
+    ):
         """Evict eligible FULL host copies by retention class and CPU LRU.
 
         Class 0 (count 0, tagged or never tagged) goes before class 1, so a
@@ -2674,30 +2755,70 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         safety remain the existing engine checks. Class 1 follows
         SGLANG_KV_SESSION_RETENTION_ORDER (_retention_eviction_key); in both
         orders its freed tokens are counted by idle age (KV_SESSION_STATS).
+
+        ``measure`` is the pool that asked; its freed host tokens end the walk.
+        It is SWA only under the uniform lifecycle, where every victim releases
+        its SWA host copy together with its FULL one; a node without an SWA
+        host copy frees nothing for it. Under full residency every host copy
+        carries its SWA, so both counts agree; window residency can hold a
+        FULL host copy without its SWA one (retention_ready_tokens). A
+        FULL+SWA tree also counts the SWA host tokens of every victim
+        (KV_SESSION_STATS swa_evicted_*).
+
+        Window SWA residency releases no duplicate (W8, as the base path): the
+        host copy is what lets a node's device SWA be demoted. ``device_drop``
+        (window residency, from the host headroom only, at scheduler level)
+        adds the backed-up device leaves that drop_backed_device_leaves
+        deletes whole, GPU copy included (W8b), as kind 2
+        (_retention_eviction_key). A class-0 device leaf then goes before a
+        class-1 host-only leaf, which the base headroom (all host-only leaves,
+        then device leaves) would free first.
         """
         retention = self.kv_session_retention
         stats = retention.stats
-        candidates = set(self.evictable_host_leaves)
-        candidates.update(
-            n
-            for n in self.full_host_duplicates.values()
-            if self._can_reclaim_host_duplicate(n)
-        )
+        has_swa = ComponentType.SWA in self.components_by_type
+        reclaim_duplicates = not self._swa_device_window()
+
+        def victim_kind(node):
+            # How the node is released now: 0 a host-only leaf, 1 the host copy
+            # of a duplicate, 2 a device leaf dropped whole; None: no candidate.
+            if node in self.evictable_host_leaves:
+                return 0
+            if reclaim_duplicates and self._can_reclaim_host_duplicate(node):
+                return 1
+            if device_drop and self._can_drop_backed_device_leaf(node):
+                return 2
+            return None
+
+        # Candidate -> kind, each tested once, in victim_kind's order.
+        kinds = dict.fromkeys(self.evictable_host_leaves, 0)
+        if reclaim_duplicates:
+            for n in self.full_host_duplicates.values():
+                if n not in kinds and self._can_reclaim_host_duplicate(n):
+                    kinds[n] = 1
+        if device_drop:
+            for n in self.evictable_device_leaves:
+                kind = None if n in kinds else victim_kind(n)
+                if kind is not None:
+                    kinds[n] = kind
         # The key ends with the node id: equal keys never compare nodes.
-        heap = [(self._retention_eviction_key(n), n) for n in candidates]
+        heap = [(self._retention_eviction_key(n, k), n) for n, k in kinds.items()]
         heapq.heapify(heap)
-        queued = {n.id for n in candidates}
-        while heap and result.tracker[BASE_COMPONENT_TYPE] < num_tokens:
+        queued = {n.id for n in kinds}
+        while heap and result.tracker[measure] < num_tokens:
             key, node = heapq.heappop(heap)
             if node.deleted:
+                continue
+            kind = victim_kind(node)
+            if kind is None:
                 continue
             parent = node.parent
             # Read before the release: deleting a leaf moves its anchors up.
             active = node.host_session_active > 0
             host_tick = node.host_last_access_time
             before = result.tracker[BASE_COMPONENT_TYPE]
-            if node in self.evictable_host_leaves:
-                duplicate = False
+            swa_before = result.tracker[ComponentType.SWA] if has_swa else 0
+            if kind == 0:
                 self._evict_host_leaf(
                     node,
                     result.tracker,
@@ -2705,8 +2826,7 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                     result.host_frees,
                     cache_actions=result.cache_actions,
                 )
-            elif self._can_reclaim_host_duplicate(node):
-                duplicate = True
+            elif kind == 1:
                 self._release_host_duplicate(
                     node,
                     result.tracker,
@@ -2715,24 +2835,131 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
                     cache_actions=result.cache_actions,
                 )
             else:
-                continue
+                self._drop_backed_device_leaf(node, result)
             freed = result.tracker[BASE_COMPONENT_TYPE] - before
-            if duplicate:
+            if kind == 1:
                 # Same metric as the base duplicate reclaim
                 # (sglang:hicache_host_duplicate_reclaimed_tokens_total).
                 result.duplicate_reclaimed_tokens += freed
-            stats.note_host_eviction(key[0], duplicate, freed, active)
+            stats.note_host_eviction(key[0], kind, freed, active)
             if key[0] == 1:
                 stats.note_class1_idle(retention.idle_age_s(host_tick), freed)
+            if has_swa:
+                stats.note_swa_host_eviction(
+                    key[0], result.tracker[ComponentType.SWA] - swa_before, active
+                )
+            if parent is not None and parent.id not in queued:
+                parent_kind = victim_kind(parent)
+                if parent_kind is not None:
+                    parent_key = self._retention_eviction_key(parent, parent_kind)
+                    heapq.heappush(heap, (parent_key, parent))
+                    queued.add(parent.id)
+
+    def _drive_retention_swa_host_eviction(self, num_tokens, result):
+        """Evict non-uniform SWA host copies by retention class and CPU LRU.
+
+        Without the uniform lifecycle the SWA host pool holds the trailing
+        windows that backups copied, and its own pressure must free SWA host
+        tokens, not FULL ones. The candidates are those of the base SWA host
+        eviction (SWAComponent.drive_host_eviction): the SWA host LRU, i.e.
+        nodes whose SWA lives only on the host and has no host lock. A host
+        leaf goes whole (its FULL host copy too); any other node loses only
+        its SWA host copy and keeps its FULL one.
+
+        The key is _retention_eviction_key for host-only copies (kind 0) with
+        one more level after the class: resume windows last. A live session
+        resumes only from the window before its anchor or its input end
+        (KvSessionRetention.swa_resume_nodes); the other windows on its path
+        (chunk boundaries, earlier turns) are not needed for that. So class 0
+        goes first, then the other class-1 windows, then the resume windows;
+        inside each, nodes without a live request first under the soft pin,
+        then the CPU tick (class 1: SGLANG_KV_SESSION_RETENTION_ORDER).
+        Without that level, a full pool would drop every window of the
+        oldest sessions while keeping their FULL host copies, which no match
+        can then use.
+
+        Victims are counted like the FULL path: FULL host tokens of a whole
+        leaf in the class/kind bins, SWA host tokens in swa_evicted_*.
+        """
+        ct = ComponentType.SWA
+        swa = self.components_by_type[ct]
+        host_lru = self.host_lru_lists[ct]
+        retention = self.kv_session_retention
+        stats = retention.stats
+        # Fixed for the walk: a resume window goes only after every other
+        # class-1 window, so an anchor that one of its deletions moves up
+        # lands on a parent whose host window, if any, went before.
+        resume = retention.swa_resume_nodes(swa.sliding_window_size)
+
+        def key(node):
+            k = self._retention_eviction_key(node, kind=0)
+            return (k[0], int(node.id in resume)) + k[1:]
+
+        # The key ends with the node id: equal keys never compare nodes.
+        heap = [(key(n), n) for n in host_lru.cache.values()]
+        heapq.heapify(heap)
+        queued = set(host_lru.cache)
+        while heap and result.tracker[ct] < num_tokens:
+            node_key, node = heapq.heappop(heap)
+            if (
+                node.deleted
+                or not host_lru.in_list(node)
+                or node.component_data[ct].host_lock_ref > 0
+            ):
+                continue
+            parent = node.parent
+            # Read before the release: deleting a leaf moves its anchors up.
+            active = node.host_session_active > 0
+            host_tick = node.host_last_access_time
+            before = result.tracker[BASE_COMPONENT_TYPE]
+            swa_before = result.tracker[ct]
+            if node in self.evictable_host_leaves:
+                self._evict_host_leaf(
+                    node,
+                    result.tracker,
+                    result.device_frees,
+                    result.host_frees,
+                    cache_actions=result.cache_actions,
+                )
+            else:
+                # kv-p2p: lease-blind, as in the base SWA path.
+                self._peer_push_swa_removed(node)
+                self._evict_component_and_detach_lru(
+                    node,
+                    swa,
+                    target=EvictLayer.HOST,
+                    tracker=result.tracker,
+                    device_frees=result.device_frees,
+                    host_frees=result.host_frees,
+                    cache_actions=result.cache_actions,
+                )
+                self._cascade_evict(
+                    node,
+                    swa,
+                    result.tracker,
+                    device_frees=result.device_frees,
+                    host_frees=result.host_frees,
+                    target=EvictLayer.HOST,
+                    cache_actions=result.cache_actions,
+                )
+            freed = result.tracker[BASE_COMPONENT_TYPE] - before
+            if freed:
+                stats.note_host_eviction(node_key[0], 0, freed, active)
+                if node_key[0] == 1:
+                    stats.note_class1_idle(retention.idle_age_s(host_tick), freed)
+            stats.note_swa_host_eviction(
+                node_key[0], result.tracker[ct] - swa_before, active, node_key[1] == 1
+            )
+            # A whole-leaf eviction can delete childless tombstone ancestors
+            # and leave the first survivor with only its SWA host copy.
+            while parent is not None and parent.deleted:
+                parent = parent.parent
             if (
                 parent is not None
                 and parent.id not in queued
-                and (
-                    parent in self.evictable_host_leaves
-                    or self._can_reclaim_host_duplicate(parent)
-                )
+                and host_lru.in_list(parent)
             ):
-                heapq.heappush(heap, (self._retention_eviction_key(parent), parent))
+                heapq.heappush(heap, (key(parent), parent))
                 queued.add(parent.id)
 
     def evict_excess_path_states(
@@ -2988,9 +3215,10 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
         """Window SWA residency host headroom (W8b): demote the least recently
         used unlocked, backed-up device leaves and delete them from the host
         until ``num_tokens`` FULL host tokens are free. Scheduler level only,
-        never inside an insert walk; the tracker counts host tokens."""
+        never inside an insert walk; the tracker counts host tokens. With
+        session retention the headroom deletes these leaves in the retention
+        walk instead (drive_host_eviction with device_drop)."""
         result = DriveHostEvictionResult()
-        device_tracker: dict[ComponentType, int] = defaultdict(int)
         # Replicated access times with node ids as tie-breakers keep the victim
         # order identical on every TP rank.
         heap = [(n.last_access_time, n.id, n) for n in self.evictable_device_leaves]
@@ -3000,24 +3228,29 @@ class UnifiedTreeCore(UnifiedTreeCoreInterface):
             if not self._can_drop_backed_device_leaf(node):
                 continue
             parent = node.parent
-            self._demote(
+            self._drop_backed_device_leaf(node, result)
+            if parent in self.evictable_device_leaves:
+                heapq.heappush(heap, (parent.last_access_time, parent.id, parent))
+        return result
+
+    def _drop_backed_device_leaf(self, node, result: DriveHostEvictionResult) -> None:
+        """Demote a backed-up device leaf, then delete it from the host. Only
+        the host frees count in ``result.tracker``."""
+        self._demote(
+            node,
+            defaultdict(int),
+            result.device_frees,
+            result.host_frees,
+            cache_actions=result.cache_actions,
+        )
+        if node in self.evictable_host_leaves:
+            self._evict_host_leaf(
                 node,
-                device_tracker,
+                result.tracker,
                 result.device_frees,
                 result.host_frees,
                 cache_actions=result.cache_actions,
             )
-            if node in self.evictable_host_leaves:
-                self._evict_host_leaf(
-                    node,
-                    result.tracker,
-                    result.device_frees,
-                    result.host_frees,
-                    cache_actions=result.cache_actions,
-                )
-            if parent in self.evictable_device_leaves:
-                heapq.heappush(heap, (parent.last_access_time, parent.id, parent))
-        return result
 
     def _can_drop_backed_device_leaf(self, node: UnifiedTreeNode) -> bool:
         swa = node.component_data[ComponentType.SWA]

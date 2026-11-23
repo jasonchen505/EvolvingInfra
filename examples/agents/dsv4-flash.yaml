@@ -7,7 +7,6 @@ served_model_name: deepseek-v4-flash
 page_size: 256
 context_length: 1048576
 gpus_per_worker: 4
-retention: false               # KV session retention needs a FULL-only cache tree; DSV4's is FULL+SWA
 engine_args:
   - --trust-remote-code
   - --moe-runner-backend=flashinfer_mxfp4
@@ -25,6 +24,8 @@ engine_args:
 engine_env:
   # Register the host KV tier for RDMA in 16 GB pieces (see h200/dsv4-flash.yaml).
   SGLANG_HICACHE_HOST_REGISTER_CHUNK_GB: 16
+  # Each KV session retention host eviction frees at least 1 % of the host pool (see h200/dsv4-flash.yaml).
+  SGLANG_KV_SESSION_HOST_EVICT_MIN_FRACTION: 0.01
 router_args:
   - --chat-tools-tokenize        # place requests with tools on the engine's token ids
   # paper reproduction, as h200/dsv4-flash.yaml: the token-count wait and no global queue (page 256 is outside the forecast error table)

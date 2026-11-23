@@ -1,7 +1,7 @@
 # Changes from SGLang
 
 The engine is SGLang's `python/sglang` at upstream release v0.5.23 (commit `297e54fd10`), renamed to
-`decoupled_engine`. Of its 6147 files, 85 are new and 139 are modified upstream files; the
+`decoupled_engine`. Of its 6147 files, 85 are new and 140 are modified upstream files; the
 rest differ from upstream only by the rename. Paths below are relative to `decoupled_engine/`.
 [README.md](README.md#relation-to-sglang) says what the changes do.
 
@@ -32,7 +32,7 @@ git grep -l 'Adapted from SGLang' -- evolving_infra/engine/decoupled_engine
 | `srt/multimodal/processors/` | `deepseek_v4_vl.py`, `glm5v.py` |
 | `srt/speculative/dspark_components/` | `dspark_synthetic_oracle.py` |
 
-## Modified upstream files (139)
+## Modified upstream files (140)
 
 Each carries the header `Adapted from SGLang <upstream path> (commit 297e54fd10)`.
 
@@ -55,7 +55,7 @@ Each carries the header `Adapted from SGLang <upstream path> (commit 297e54fd10)
 | `srt/disaggregation/mooncake/` | `conn.py` |
 | `srt/disaggregation/nixl/` | `conn.py` |
 | `srt/distributed/device_communicators/` | `mooncake_transfer_engine.py` |
-| `srt/entrypoints/` | `engine.py`, `grpc_bridge.py`, `http_server.py` |
+| `srt/entrypoints/` | `api_contract.py`, `engine.py`, `grpc_bridge.py`, `http_server.py` |
 | `srt/entrypoints/openai/` | `protocol.py`, `serving_chat.py`, `serving_completions.py`, `utils.py` |
 | `srt/function_call/` | `glm47_moe_detector.py`, `glm4_moe_detector.py`, `utils.py` |
 | `srt/hardware_backend/npu/dsv4/` | `dsv4_memory_pool.py` |
