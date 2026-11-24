@@ -94,6 +94,7 @@ from decoupled_engine.srt.layers.cp.utils import (
 )
 from decoupled_engine.srt.layers.dp_attention import get_dp_tp_group
 from decoupled_engine.srt.layers.logits_processor import LogitsProcessorOutput
+from decoupled_engine.srt.layers.moe.mega_moe import allocate_mega_moe_buffers
 from decoupled_engine.srt.layers.sampler import create_sampler
 from decoupled_engine.srt.lora.lora_manager import LoRAManager, init_lora_cuda_graph_moe_buffers
 from decoupled_engine.srt.lora.lora_registry import LoRARef
@@ -756,6 +757,7 @@ class ModelRunner:
             capture_tail_hooks=self.capture_tail_hooks,
             is_draft=self.is_draft_worker,
         )
+        allocate_mega_moe_buffers(self.model)
 
     def init_memory_saver_adapter(self):
         self.memory_saver_adapter = TorchMemorySaverAdapter.create(
@@ -1865,10 +1867,19 @@ class ModelRunner:
             else contextlib.nullcontext()
         )
 
+        recorder = get_global_expert_distribution_recorder()
+        # Draft batches can also use TARGET_VERIFY; ownership comes from the runner.
+        record_ctx = (
+            recorder.disable_this_region()
+            if self.is_draft_worker
+            else contextlib.nullcontext()
+        )
+
         with (
             canary_ctx,
             step_span_ctx,
-            get_global_expert_distribution_recorder().with_forward_pass(
+            record_ctx,
+            recorder.with_forward_pass(
                 self.forward_pass_id,
                 forward_batch,
             ) as recorder_outputs,

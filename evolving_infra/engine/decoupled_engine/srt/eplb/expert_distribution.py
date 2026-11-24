@@ -11,6 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
+# Adapted from SGLang python/sglang/srt/eplb/expert_distribution.py (commit 297e54fd10), modified for evolving-infra.
 
 from __future__ import annotations
 
@@ -244,6 +245,11 @@ class _ExpertDistributionRecorderReal(ExpertDistributionRecorder):
 
     @contextmanager
     def with_forward_pass(self, forward_pass_id: int, forward_batch: ForwardBatch):
+        # A disabled pass must not reset, collect, or publish target statistics.
+        if self._disable_all:
+            yield {}
+            return
+
         outputs = {}
         with self._current_forward_pass_id.with_value(forward_pass_id):
             self._on_forward_pass_start(forward_batch)

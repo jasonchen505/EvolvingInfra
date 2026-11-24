@@ -5293,6 +5293,10 @@ class Scheduler(
             dllm_config=self.dllm_config,
             waiting_queue_len=len(self.waiting_queue),
             prefill_tile_block_m=prefill_tile_block_m,
+            # PD prefill holds sent KV on its inflight queue; symmetric mode holds
+            # exported KV in its export table until the reader is done.
+            kv_awaiting_transfer=bool(self.disagg_prefill_inflight_queue)
+            or self.symmetric_has_leased_pages(),
         )
 
         need_mode = getattr(self, "_late_d_need_enabled", False)
